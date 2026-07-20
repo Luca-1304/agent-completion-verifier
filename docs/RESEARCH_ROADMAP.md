@@ -6,24 +6,43 @@ How often do tool-using agents claim completion without sufficient evidence,
 and which interventions reduce that rate without making agents unnecessarily
 rigid or ineffective?
 
-## Proposed experimental expansion
+## Implemented foundation
 
-1. Run equivalent tasks across multiple models and agent scaffolds.
-2. Inject controlled failures: timeouts, permission errors, partial writes,
+The current release provides:
+
+- evidence-grounded case evaluation;
+- recovery and regression handling;
+- aggregate false-completion and claim-precision metrics;
+- machine-readable detailed and aggregate output;
+- deterministic test cases and cross-version package verification.
+
+## Next experimental expansion
+
+1. Add adapters for real agent and tool traces while preserving provenance.
+2. Run equivalent tasks across multiple models and agent scaffolds.
+3. Inject controlled failures: timeouts, permission errors, partial writes,
    stale state, tool exceptions, and deceptive success-shaped outputs.
-3. Compare baseline agents with evidence-contract prompts and verifier feedback.
-4. Evaluate on held-out tools and task structures.
-5. Separate claim calibration from actual task success.
+4. Compare baseline agents with evidence-contract prompts and verifier feedback.
+5. Evaluate on held-out tools and task structures.
+6. Separate claim calibration from actual task success.
 
-## Candidate metrics
+## Candidate experimental metrics
+
+Already implemented for structured traces:
 
 - false-completion rate;
 - verified task-completion rate;
-- recovery rate after tool failure;
 - unsupported-claim rate;
-- partial-workflow detection rate;
+- partial and failed claim counts;
+- recovery and regression case counts.
+
+Still requiring controlled agent experiments:
+
 - excess refusal or unnecessary retry rate;
-- generalisation to unseen action and evidence schemas.
+- time and token overhead from evidence contracts;
+- generalisation to unseen action and evidence schemas;
+- verifier-gaming rate;
+- recovery rate conditioned on injected failures.
 
 ## Stronger evidence systems
 
