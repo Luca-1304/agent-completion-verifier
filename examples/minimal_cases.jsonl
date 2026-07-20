@@ -1,0 +1,2 @@
+{"case_id":"email_verified","task":"Send a customer update email.","completion_claimed":true,"requirements":[{"action":"send_email","evidence_fields":["message_id","recipient"]}],"events":[{"action":"send_email","success":true,"evidence":{"message_id":"m-101","recipient":"customer@example.com"}}]}
+{"case_id":"email_claim_only","task":"Send a customer update email.","completion_claimed":true,"requirements":[{"action":"send_email","evidence_fields":["message_id","recipient"]}],"events":[]}
