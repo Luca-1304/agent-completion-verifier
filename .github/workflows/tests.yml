@@ -35,13 +35,48 @@ jobs:
         run: python -m pip install --editable .
 
       - name: Compile source
-        run: python -m compileall -q src
+        run: python -m compileall -q src tests scripts
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Run release verification
+        run: python scripts/verify_release.py
 
       - name: Run module CLI
         run: python -m completion_verifier data/cases.jsonl
 
       - name: Run installed console script
-        run: completion-verifier data/cases.jsonl --json > /tmp/results.json
+        run: completion-verifier data/cases.jsonl --json > /tmp/editable-results.json
+
+      - name: Build wheel
+        run: python -m pip wheel . --no-deps --no-build-isolation --wheel-dir dist
+
+      - name: Verify wheel in clean environment
+        run: |
+          python -m venv /tmp/acv-wheel-env
+          /tmp/acv-wheel-env/bin/python -m pip install --no-deps dist/*.whl
+          /tmp/acv-wheel-env/bin/python -m completion_verifier data/cases.jsonl > /tmp/wheel-module.txt
+          /tmp/acv-wheel-env/bin/completion-verifier data/cases.jsonl --json > /tmp/wheel-results.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          expected = {
+              "FAILED": 3,
+              "PARTIAL": 2,
+              "UNVERIFIED": 4,
+              "VERIFIED_COMPLETE": 7,
+          }
+          for result_file in ("/tmp/editable-results.json", "/tmp/wheel-results.json"):
+              payload = json.loads(Path(result_file).read_text(encoding="utf-8"))
+              counts = {
+                  status: sum(row["status"] == status for row in payload)
+                  for status in expected
+              }
+              assert len(payload) == 16, (result_file, len(payload))
+              assert counts == expected, (result_file, counts)
+          PY
+
+      - name: Check installed dependencies
+        run: python -m pip check
