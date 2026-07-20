@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 from .evaluator import evaluate_cases
+from .metrics import calculate_metrics
 from .models import Case
 
 
@@ -30,8 +31,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Evaluate whether AI-agent completion claims are evidence-grounded."
     )
     parser.add_argument("cases", type=Path, help="Path to a JSONL case file.")
-    parser.add_argument(
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument(
         "--json", action="store_true", help="Emit detailed machine-readable JSON."
+    )
+    output.add_argument(
+        "--metrics",
+        action="store_true",
+        help="Emit aggregate benchmark metrics as machine-readable JSON.",
     )
     return parser
 
@@ -40,11 +47,14 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     try:
-        evaluations = evaluate_cases(load_cases(args.cases))
+        cases = load_cases(args.cases)
+        evaluations = evaluate_cases(cases)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
 
-    if args.json:
+    if args.metrics:
+        print(json.dumps(calculate_metrics(cases, evaluations).to_dict(), indent=2))
+    elif args.json:
         print(json.dumps([value.to_dict() for value in evaluations], indent=2))
     else:
         for item in evaluations:

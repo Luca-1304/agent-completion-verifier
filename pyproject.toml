@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-completion-verifier"
-version = "0.1.0"
-description = "Evidence-grounded evaluation for AI-agent completion claims"
+version = "0.2.0"
+description = "A model-agnostic evaluator for evidence-grounded AI agent completion"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "Luca Panayiotou" }]
-keywords = ["ai-agents", "evaluation", "reliability", "ai-safety"]
+license = {text = "MIT"}
+authors = [{name = "Luca Panayiotou"}]
+keywords = ["ai-agents", "evaluation", "reliability", "tool-use", "ai-safety"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
@@ -19,10 +19,19 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+dependencies = []
 
 [project.scripts]
 completion-verifier = "completion_verifier.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Luca-1304/agent-completion-verifier"
+Issues = "https://github.com/Luca-1304/agent-completion-verifier/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

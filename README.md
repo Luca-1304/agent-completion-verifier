@@ -1,5 +1,7 @@
 # Agent Completion Verifier
 
+[![tests](https://github.com/Luca-1304/agent-completion-verifier/actions/workflows/tests.yml/badge.svg)](https://github.com/Luca-1304/agent-completion-verifier/actions/workflows/tests.yml)
+
 A small, model-agnostic evaluation harness for detecting **false completion**:
 when an AI agent says a task is finished without enough evidence that the
 required external action actually succeeded.
@@ -91,6 +93,25 @@ Use `--json` for machine-readable output:
 completion-verifier data/cases.jsonl --json
 ```
 
+## Aggregate benchmark metrics
+
+Use `--metrics` to calculate claim-quality and trace-level measurements:
+
+```bash
+completion-verifier data/cases.jsonl --metrics
+```
+
+The metrics report includes:
+
+- false-completion rate among claimed completions;
+- completion-claim precision;
+- verified, partial, unverified, and failed case counts;
+- unsupported, partial, and failed claim counts;
+- silent verified completions;
+- recovered and regressed workflows.
+
+See [`docs/METRICS.md`](docs/METRICS.md) for definitions and denominators.
+
 ## What is tested
 
 The included cases cover:
@@ -125,7 +146,7 @@ Panayiotou** through sustained testing of long-running AI workflows.
 
 AI assistance was used to translate those requirements into Python,
 documentation, and executable tests. The implementation was then checked by
-running the test suite and example evaluation. See
+running the test suite, package verification, and example evaluation. See
 [`docs/CONTRIBUTION.md`](docs/CONTRIBUTION.md) for the detailed contribution
 statement.
 
