@@ -58,6 +58,9 @@ jobs:
       - name: Run installed benchmark CLI
         run: completion-verifier-benchmark --config examples/benchmark_config.json --output /tmp/editable-benchmark > /tmp/editable-benchmark-summary.json
 
+      - name: Run installed sandbox CLI
+        run: completion-verifier-sandbox --config examples/sandbox_config.json --output /tmp/editable-sandbox --scenario all > /tmp/editable-sandbox-summary.json
+
       - name: Build wheel
         run: python -m pip wheel . --no-deps --no-build-isolation --wheel-dir dist
 
@@ -70,6 +73,7 @@ jobs:
           /tmp/acv-wheel-env/bin/completion-verifier-adapt generic examples/generic_trace.json examples/requirements.json --source-ref wheel-generic --envelope > /tmp/wheel-generic-envelope.json
           /tmp/acv-wheel-env/bin/completion-verifier-adapt openai examples/openai_tool_trace.json examples/requirements.json --source-ref wheel-openai > /tmp/wheel-openai-case.json
           /tmp/acv-wheel-env/bin/completion-verifier-benchmark --config examples/benchmark_config.json --output /tmp/wheel-benchmark > /tmp/wheel-benchmark-summary.json
+          /tmp/acv-wheel-env/bin/completion-verifier-sandbox --config examples/sandbox_config.json --output /tmp/wheel-sandbox --scenario all > /tmp/wheel-sandbox-summary.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -110,6 +114,7 @@ jobs:
               assert payload["events"][0]["action"] == "send_email"
 
           from completion_verifier.benchmark import verify_manifest
+          from completion_verifier.sandbox import verify_sandbox_manifest
 
           for summary_file in (
               "/tmp/editable-benchmark-summary.json",
@@ -130,6 +135,37 @@ jobs:
           assert benchmark["groups"]["baseline"]["rates"]["false_completion_rate"] == 0.875
           assert abs(benchmark["groups"]["evidence_contract"]["rates"]["false_completion_rate"] - (1 / 3)) < 1e-12
           assert abs(benchmark["groups"]["verifier_feedback"]["rates"]["false_completion_rate"] - (1 / 6)) < 1e-12
+
+          for summary_file in (
+              "/tmp/editable-sandbox-summary.json",
+              "/tmp/wheel-sandbox-summary.json",
+          ):
+              payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+              assert payload["total_scenarios"] == 8
+              assert payload["manifest_verified"] is True
+              assert payload["false_completion_rate"] == 0.75
+
+          assert verify_sandbox_manifest(Path("/tmp/editable-sandbox"))
+          assert verify_sandbox_manifest(Path("/tmp/wheel-sandbox"))
+          editable_sandbox = Path("/tmp/editable-sandbox/metrics.json").read_bytes()
+          wheel_sandbox = Path("/tmp/wheel-sandbox/metrics.json").read_bytes()
+          assert editable_sandbox == wheel_sandbox
+          sandbox = json.loads(editable_sandbox)
+          assert sandbox["status_counts"] == {
+              "VERIFIED_COMPLETE": 2,
+              "PARTIAL": 0,
+              "UNVERIFIED": 0,
+              "FAILED": 6,
+          }
+          assert sandbox["claimed_completion"] == 4
+          assert sandbox["false_completion"] == 3
+          assert sandbox["false_completion_rate"] == 0.75
+          assert sandbox["silent_verified_completion"] == 1
+          assert sandbox["source_false_positive"] == 3
+          assert sandbox["source_false_negative"] == 1
+          assert sandbox["security_rejection"] == 2
+          assert not any(path.is_symlink() for path in Path("/tmp/editable-sandbox").rglob("*"))
+          assert not any(path.is_symlink() for path in Path("/tmp/wheel-sandbox").rglob("*"))
           PY
 
       - name: Check installed dependencies

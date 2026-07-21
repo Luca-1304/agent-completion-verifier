@@ -1,0 +1,19 @@
+{
+  "suite_id": "sandbox-reference-v1",
+  "generated_at": "2026-07-21T00:00:00Z",
+  "scenarios": [
+    "success",
+    "false_success",
+    "partial_write",
+    "timeout_before_write",
+    "timeout_after_write",
+    "rollback",
+    "path_traversal",
+    "symlink_escape"
+  ],
+  "contract": {
+    "contract_id": "write-customer-update",
+    "path": "output/customer-update.txt",
+    "content": "Customer update sent.\n"
+  }
+}

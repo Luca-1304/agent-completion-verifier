@@ -153,6 +153,24 @@ failure-conditioned metrics, and verifies a SHA-256 manifest. The included
 results validate the harness only and are **not external-model benchmark
 results**. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
 
+## Independent local postconditions
+
+Version 0.5 adds a confined UTF-8 file-write sandbox where canonical evidence
+comes from independently observed local state rather than source-reported
+receipts:
+
+```bash
+completion-verifier-sandbox \
+  --config examples/sandbox_config.json \
+  --output sandbox_runs/reference-v1 \
+  --scenario all
+```
+
+The reference suite detects false success, partial writes and rollback; verifies
+a timeout-after-write from actual state; and rejects traversal and symlink
+escapes. It stores source reports, observations, cases and evaluations
+separately. See [`docs/SANDBOX.md`](docs/SANDBOX.md).
+
 ## What is tested
 
 The included cases cover:
@@ -170,9 +188,10 @@ See [`RESULTS.md`](RESULTS.md) for the reproducible local result summary and
 
 ## Scope and limitations
 
-This repository evaluates structured cases and can transform strict source
-traces. It does not independently prove that a source-reported evidence value
-is authentic. Production use would require trusted event sources, provenance,
+This repository evaluates structured cases, transforms strict source traces,
+and can independently observe a narrow local file postcondition. It does not
+prove remote state, identity, authorization or causal attribution. Production
+use would require trusted event sources, stronger OS isolation, provenance,
 identity and authorization checks, tamper resistance, and domain-specific
 evidence validation.
 
@@ -194,7 +213,7 @@ statement.
 
 ## Roadmap
 
-The next research step is to connect the controlled benchmark to versioned real-agent runners while preserving prompts, model settings, raw traces, costs and independent evidence checks. See [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
+The next research step is to connect a versioned real-agent runner to the confined sandbox while preserving prompts, model settings, raw reports, costs and independent observations. See [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
 
 ## License
 
