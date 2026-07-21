@@ -1,0 +1,6 @@
+[
+  {
+    "action": "send_email",
+    "evidence_fields": ["message_id", "recipient"]
+  }
+]
