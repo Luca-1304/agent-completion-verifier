@@ -112,6 +112,30 @@ The metrics report includes:
 
 See [`docs/METRICS.md`](docs/METRICS.md) for definitions and denominators.
 
+## Real trace adapters
+
+Version 0.3 converts strict external tool traces into canonical verifier cases
+without mixing provenance metadata into task evidence. Requirements remain an
+independent acceptance contract.
+
+```bash
+completion-verifier-adapt generic \
+  examples/generic_trace.json \
+  examples/requirements.json \
+  --source-ref run-123 \
+  --envelope
+
+completion-verifier-adapt openai \
+  examples/openai_tool_trace.json \
+  examples/requirements.json \
+  --source-ref response-123
+```
+
+The generic adapter preserves ordered events, retries, failures and optional
+source event IDs. The simplified OpenAI-style adapter pairs strict tool calls
+and results by `tool_call_id`. Both reject ambiguous or malformed input. See
+[`docs/ADAPTERS.md`](docs/ADAPTERS.md) for schemas and the trust boundary.
+
 ## What is tested
 
 The included cases cover:
@@ -129,10 +153,11 @@ See [`RESULTS.md`](RESULTS.md) for the reproducible local result summary and
 
 ## Scope and limitations
 
-This repository is intentionally small. It evaluates structured traces; it does
-not independently prove that an evidence value is authentic. Production use
-would require trusted event sources, provenance, identity and authorization
-checks, tamper resistance, and domain-specific evidence validation.
+This repository evaluates structured cases and can transform strict source
+traces. It does not independently prove that a source-reported evidence value
+is authentic. Production use would require trusted event sources, provenance,
+identity and authorization checks, tamper resistance, and domain-specific
+evidence validation.
 
 The included results come from this deterministic evaluator. They are **not**
 live benchmark results for external AI models, and this project makes no claim
@@ -152,9 +177,10 @@ statement.
 
 ## Roadmap
 
-The next research step is to connect the evaluator to controlled agent runs and
-measure false-completion rates across models, scaffolds, tools, and failure
-conditions. See [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
+The next research step is a controlled failure-injection benchmark using
+retained raw traces, provenance-linked envelopes, and derived cases to compare
+baseline agents with evidence-contract interventions. See
+[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
 
 ## License
 
