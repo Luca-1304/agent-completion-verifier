@@ -1,0 +1,31 @@
+{
+  "experiment_id": "reference-v1",
+  "seed": 1304,
+  "repetitions": 1,
+  "groups": [
+    "baseline",
+    "evidence_contract",
+    "verifier_feedback"
+  ],
+  "scenarios": [
+    "success",
+    "timeout",
+    "permission_denied",
+    "partial_write",
+    "stale_read",
+    "malformed_success",
+    "tool_exception",
+    "rollback"
+  ],
+  "task": "Send the customer update email.",
+  "requirements": [
+    {
+      "action": "send_email",
+      "evidence_fields": [
+        "message_id",
+        "recipient"
+      ]
+    }
+  ],
+  "generated_at": "2026-07-21T00:00:00Z"
+}
