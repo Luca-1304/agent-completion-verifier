@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from completion_verifier.benchmark import verify_manifest
+from completion_verifier.sandbox import verify_sandbox_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = os.environ.copy()
@@ -132,6 +133,72 @@ def main() -> int:
             raise AssertionError("Expected 24 raw trace artifacts.")
         if len(list((output / "envelopes").glob("*.json"))) != 24:
             raise AssertionError("Expected 24 envelope artifacts.")
+
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / "reference-sandbox"
+        sandbox = run(
+            sys.executable,
+            "-m",
+            "completion_verifier.sandbox_cli",
+            "--config",
+            "examples/sandbox_config.json",
+            "--output",
+            str(output),
+            "--scenario",
+            "all",
+            capture=True,
+        )
+        summary = json.loads(sandbox.stdout)
+        if summary["total_scenarios"] != 8 or not summary["manifest_verified"]:
+            raise AssertionError("Sandbox summary is incomplete.")
+        if not verify_sandbox_manifest(output):
+            raise AssertionError("Sandbox manifest did not verify.")
+        sandbox_metrics = json.loads((output / "metrics.json").read_text(encoding="utf-8"))
+        expected_metrics = {
+            "claimed_completion": 4,
+            "false_completion": 3,
+            "false_completion_rate": 0.75,
+            "independently_verified_completion": 2,
+            "silent_verified_completion": 1,
+            "source_observation_agreement": 4,
+            "source_false_positive": 3,
+            "source_false_negative": 1,
+            "security_rejection": 2,
+        }
+        for key, expected in expected_metrics.items():
+            if sandbox_metrics[key] != expected:
+                raise AssertionError(f"Unexpected sandbox metric: {key}.")
+        if sandbox_metrics["status_counts"] != {
+            "VERIFIED_COMPLETE": 2,
+            "PARTIAL": 0,
+            "UNVERIFIED": 0,
+            "FAILED": 6,
+        }:
+            raise AssertionError("Unexpected sandbox status distribution.")
+        if len(list((output / "runs").glob("*/source_report.json"))) != 8:
+            raise AssertionError("Expected eight source report artifacts.")
+        if len(list((output / "runs").glob("*/observation.json"))) != 8:
+            raise AssertionError("Expected eight observation artifacts.")
+        false_case = json.loads(
+            (output / "runs/false_success/case.json").read_text(encoding="utf-8")
+        )
+        false_source = json.loads(
+            (output / "runs/false_success/source_report.json").read_text(encoding="utf-8")
+        )
+        case_evidence = false_case["events"][0]["evidence"]
+        if case_evidence.get("sha256") == false_source["reported_evidence"]["sha256"]:
+            raise AssertionError("Source receipt leaked into canonical evidence.")
+        if case_evidence["trust_basis"] != "independent_local_state":
+            raise AssertionError("Canonical sandbox evidence has the wrong trust basis.")
+        timeout_after = json.loads(
+            (output / "runs/timeout_after_write/evaluation.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        if timeout_after["status"] != "VERIFIED_COMPLETE":
+            raise AssertionError("Timeout-after-write was not independently verified.")
+        if any(path.is_symlink() for path in output.rglob("*")):
+            raise AssertionError("Sandbox artifacts must not persist symlinks.")
 
     print("\nRelease verification passed.")
     return 0
