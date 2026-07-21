@@ -1,24 +1,27 @@
 # Reproducible results
 
-Verified locally and through GitHub Actions on 20 July 2026.
+Verified locally on 21 July 2026. GitHub Actions repeats the release checks on
+Python 3.10, 3.11, 3.12, and 3.13 before merge.
 
 ## Verification coverage
 
 ```text
-Ran 44 tests
+Ran 74 tests
 
 OK
 ```
 
-The release matrix runs on Python 3.10, 3.11, 3.12, and 3.13. Each job:
+Each release job:
 
 - compiles source, tests, and verification scripts;
-- runs all unit tests;
+- runs all 74 unit tests;
 - executes the release verifier;
-- checks both CLI entry points;
+- checks detailed and aggregate evaluator output;
+- checks generic and simplified OpenAI-style trace conversion;
 - builds a wheel;
 - installs the wheel in a separate clean environment;
-- confirms the 16-case result distribution;
+- reruns both evaluator and adapter console commands from that wheel;
+- confirms the 16-case result distribution and provenance invariants;
 - runs dependency consistency checks.
 
 ## Example case run
@@ -81,13 +84,33 @@ Summary
 }
 ```
 
-These are deterministic evaluator results from intentionally mixed test cases.
-They are not live external-model benchmark results and should not be interpreted
-as a model capability score.
+## Adapter verification
+
+The generic example contains a timeout followed by a successful retry. The
+adapter preserves both events in source order and the evaluator returns
+`VERIFIED_COMPLETE` from the latest evidenced event.
+
+The simplified OpenAI-style example pairs one `tool_call` with one
+`tool_result`. The tool-call arguments do not enter the event evidence; only the
+result's source-reported evidence is converted.
+
+The release gate also confirms:
+
+- the canonical JSON source digest is 64 hexadecimal characters;
+- source references survive envelope conversion;
+- provenance never appears inside task evidence;
+- canonical case output contains no source envelope fields;
+- editable and clean-wheel installations produce equivalent results.
+
+These are deterministic evaluator and transformation results. They are not live
+external-model benchmark results and should not be interpreted as a model
+capability score or independent proof of external state.
 
 ## Reproduce
 
 ```bash
 python scripts/verify_release.py
 completion-verifier data/cases.jsonl --metrics
+completion-verifier-adapt generic examples/generic_trace.json examples/requirements.json --source-ref local-run --envelope
+completion-verifier-adapt openai examples/openai_tool_trace.json examples/requirements.json --source-ref local-response
 ```
