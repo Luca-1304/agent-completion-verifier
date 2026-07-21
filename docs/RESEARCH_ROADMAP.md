@@ -14,15 +14,19 @@ The current release provides:
 - recovery and regression handling;
 - aggregate false-completion and claim-precision metrics;
 - machine-readable detailed and aggregate output;
+- strict generic JSON and simplified OpenAI-style trace adapters;
+- provenance-linked trace envelopes with canonical JSON digests;
 - deterministic test cases and cross-version package verification.
 
 ## Next experimental expansion
 
-1. Add adapters for real agent and tool traces while preserving provenance.
+1. Build a controlled failure-injection harness that retains raw traces,
+   requirements, derived envelopes, cases, evaluations, and metrics separately.
 2. Run equivalent tasks across multiple models and agent scaffolds.
 3. Inject controlled failures: timeouts, permission errors, partial writes,
-   stale state, tool exceptions, and deceptive success-shaped outputs.
-4. Compare baseline agents with evidence-contract prompts and verifier feedback.
+   stale state, tool exceptions, deceptive success-shaped outputs, and rollback.
+4. Compare baseline instructions with evidence-contract instructions and
+   evidence-contract instructions plus verifier feedback.
 5. Evaluate on held-out tools and task structures.
 6. Separate claim calibration from actual task success.
 
@@ -64,3 +68,5 @@ Future versions could validate evidence through:
   evaluator?
 - How should uncertainty be represented when external state is temporarily
   unreadable?
+- Which raw trace fields are necessary for reproducibility without retaining
+  sensitive content?

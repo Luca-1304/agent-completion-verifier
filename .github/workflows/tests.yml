@@ -43,11 +43,17 @@ jobs:
       - name: Run release verification
         run: python scripts/verify_release.py
 
-      - name: Run module CLI
+      - name: Run evaluator module CLI
         run: python -m completion_verifier data/cases.jsonl
 
-      - name: Run installed console script
+      - name: Run installed evaluator CLI
         run: completion-verifier data/cases.jsonl --json > /tmp/editable-results.json
+
+      - name: Run installed generic adapter CLI
+        run: completion-verifier-adapt generic examples/generic_trace.json examples/requirements.json --source-ref editable-generic --envelope > /tmp/editable-generic-envelope.json
+
+      - name: Run installed OpenAI-style adapter CLI
+        run: completion-verifier-adapt openai examples/openai_tool_trace.json examples/requirements.json --source-ref editable-openai > /tmp/editable-openai-case.json
 
       - name: Build wheel
         run: python -m pip wheel . --no-deps --no-build-isolation --wheel-dir dist
@@ -58,6 +64,8 @@ jobs:
           /tmp/acv-wheel-env/bin/python -m pip install --no-deps dist/*.whl
           /tmp/acv-wheel-env/bin/python -m completion_verifier data/cases.jsonl > /tmp/wheel-module.txt
           /tmp/acv-wheel-env/bin/completion-verifier data/cases.jsonl --json > /tmp/wheel-results.json
+          /tmp/acv-wheel-env/bin/completion-verifier-adapt generic examples/generic_trace.json examples/requirements.json --source-ref wheel-generic --envelope > /tmp/wheel-generic-envelope.json
+          /tmp/acv-wheel-env/bin/completion-verifier-adapt openai examples/openai_tool_trace.json examples/requirements.json --source-ref wheel-openai > /tmp/wheel-openai-case.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -76,6 +84,26 @@ jobs:
               }
               assert len(payload) == 16, (result_file, len(payload))
               assert counts == expected, (result_file, counts)
+
+          for envelope_file, expected_ref in (
+              ("/tmp/editable-generic-envelope.json", "editable-generic"),
+              ("/tmp/wheel-generic-envelope.json", "wheel-generic"),
+          ):
+              payload = json.loads(Path(envelope_file).read_text(encoding="utf-8"))
+              assert payload["source"]["source_ref"] == expected_ref
+              assert len(payload["source"]["raw_sha256"]) == 64
+              assert all(
+                  "source_event_id" not in event["evidence"]
+                  for event in payload["events"]
+              )
+
+          for case_file in (
+              "/tmp/editable-openai-case.json",
+              "/tmp/wheel-openai-case.json",
+          ):
+              payload = json.loads(Path(case_file).read_text(encoding="utf-8"))
+              assert "source" not in payload
+              assert payload["events"][0]["action"] == "send_email"
           PY
 
       - name: Check installed dependencies

@@ -1,0 +1,24 @@
+{
+  "trace_id": "generic-email-retry",
+  "task": "Send the customer update email.",
+  "completion_claimed": true,
+  "events": [
+    {
+      "source_event_id": "event-1",
+      "action": "send_email",
+      "success": false,
+      "evidence": {
+        "error": "timeout"
+      }
+    },
+    {
+      "source_event_id": "event-2",
+      "action": "send_email",
+      "success": true,
+      "evidence": {
+        "message_id": "msg-102",
+        "recipient": "customer@example.com"
+      }
+    }
+  ]
+}
