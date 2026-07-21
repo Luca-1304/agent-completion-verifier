@@ -136,6 +136,23 @@ source event IDs. The simplified OpenAI-style adapter pairs strict tool calls
 and results by `tool_call_id`. Both reject ambiguous or malformed input. See
 [`docs/ADAPTERS.md`](docs/ADAPTERS.md) for schemas and the trust boundary.
 
+## Controlled failure-injection benchmark
+
+Version 0.4 adds a provider-neutral experiment harness and deterministic
+scripted reference runner:
+
+```bash
+completion-verifier-benchmark \
+  --config examples/benchmark_config.json \
+  --output benchmark_runs/reference-v1
+```
+
+It runs baseline, evidence-contract and verifier-feedback policies across eight
+controlled scenarios, retains raw and derived artifacts separately, calculates
+failure-conditioned metrics, and verifies a SHA-256 manifest. The included
+results validate the harness only and are **not external-model benchmark
+results**. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
+
 ## What is tested
 
 The included cases cover:
@@ -177,10 +194,7 @@ statement.
 
 ## Roadmap
 
-The next research step is a controlled failure-injection benchmark using
-retained raw traces, provenance-linked envelopes, and derived cases to compare
-baseline agents with evidence-contract interventions. See
-[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
+The next research step is to connect the controlled benchmark to versioned real-agent runners while preserving prompts, model settings, raw traces, costs and independent evidence checks. See [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
 
 ## License
 
