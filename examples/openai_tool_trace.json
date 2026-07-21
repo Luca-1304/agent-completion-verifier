@@ -1,0 +1,25 @@
+{
+  "trace_id": "openai-style-email",
+  "task": "Send the customer update email.",
+  "completion_claimed": true,
+  "records": [
+    {
+      "type": "tool_call",
+      "tool_call_id": "call-1",
+      "name": "send_email",
+      "arguments": {
+        "recipient": "customer@example.com",
+        "subject": "Update"
+      }
+    },
+    {
+      "type": "tool_result",
+      "tool_call_id": "call-1",
+      "success": true,
+      "evidence": {
+        "message_id": "msg-103",
+        "recipient": "customer@example.com"
+      }
+    }
+  ]
+}
