@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-completion-verifier"
-version = "0.3.0"
+version = "0.4.0"
 description = "A model-agnostic evaluator for evidence-grounded AI agent completion"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,6 +26,7 @@ dependencies = []
 [project.scripts]
 completion-verifier = "completion_verifier.cli:main"
 completion-verifier-adapt = "completion_verifier.adapter_cli:main"
+completion-verifier-benchmark = "completion_verifier.benchmark_cli:main"
 
 [project.urls]
 Repository = "https://github.com/Luca-1304/agent-completion-verifier"
