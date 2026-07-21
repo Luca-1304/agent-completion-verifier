@@ -16,37 +16,38 @@ The current release provides:
 - machine-readable detailed and aggregate output;
 - strict generic JSON and simplified OpenAI-style trace adapters;
 - provenance-linked trace envelopes with canonical JSON digests;
-- deterministic test cases and cross-version package verification.
+- controlled timeout, permission, partial-write, stale-read, malformed-success,
+  exception and rollback scenarios;
+- baseline, evidence-contract and verifier-feedback treatment labels;
+- a deterministic scripted reference runner;
+- separated raw, envelope, case, evaluation, run and metrics artifacts;
+- artifact manifest verification and cross-version package verification.
 
 ## Next experimental expansion
 
-1. Build a controlled failure-injection harness that retains raw traces,
-   requirements, derived envelopes, cases, evaluations, and metrics separately.
-2. Run equivalent tasks across multiple models and agent scaffolds.
-3. Inject controlled failures: timeouts, permission errors, partial writes,
-   stale state, tool exceptions, deceptive success-shaped outputs, and rollback.
-4. Compare baseline instructions with evidence-contract instructions and
-   evidence-contract instructions plus verifier feedback.
-5. Evaluate on held-out tools and task structures.
-6. Separate claim calibration from actual task success.
+1. Implement a real runner adapter with explicit model, prompt, sampling, tool,
+   date, cost and token metadata.
+2. Run the same source-controlled configuration across at least two independently
+   implemented agent scaffolds.
+3. Add independent postcondition checks for a safe local sandbox rather than
+   relying only on source-reported tool evidence.
+4. Repeat each condition enough times for uncertainty intervals and sensitivity
+   analysis.
+5. Evaluate held-out actions, evidence contracts and failure schedules.
+6. Measure whether verifier feedback causes gaming, excess refusal or
+   unnecessary retries.
 
-## Candidate experimental metrics
-
-Already implemented for structured traces:
+## Metrics already implemented
 
 - false-completion rate;
-- verified task-completion rate;
-- unsupported-claim rate;
-- partial and failed claim counts;
-- recovery and regression case counts.
-
-Still requiring controlled agent experiments:
-
-- excess refusal or unnecessary retry rate;
-- time and token overhead from evidence contracts;
-- generalisation to unseen action and evidence schemas;
-- verifier-gaming rate;
-- recovery rate conditioned on injected failures.
+- completion-claim precision;
+- verified completion rate;
+- unsupported, partial and failed claims;
+- recovery and regression counts;
+- recovery rate conditioned on injected failure;
+- unnecessary retry and refusal rates;
+- per-group and per-scenario summaries;
+- timing and token means when real values are supplied.
 
 ## Stronger evidence systems
 
