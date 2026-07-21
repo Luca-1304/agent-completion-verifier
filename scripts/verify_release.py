@@ -6,7 +6,10 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+from completion_verifier.benchmark import verify_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = os.environ.copy()
@@ -92,6 +95,43 @@ def main() -> int:
         raise AssertionError("Canonical case output must not contain provenance fields.")
     if openai_payload["events"][0]["action"] != "send_email":
         raise AssertionError("OpenAI-style adapter produced the wrong action.")
+
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / "reference-benchmark"
+        benchmark = run(
+            sys.executable,
+            "-m",
+            "completion_verifier.benchmark_cli",
+            "--config",
+            "examples/benchmark_config.json",
+            "--output",
+            str(output),
+            capture=True,
+        )
+        summary = json.loads(benchmark.stdout)
+        if summary["total_runs"] != 24 or not summary["manifest_verified"]:
+            raise AssertionError("Benchmark summary is incomplete.")
+        if not verify_manifest(output):
+            raise AssertionError("Benchmark manifest did not verify.")
+        benchmark_metrics = json.loads((output / "metrics.json").read_text(encoding="utf-8"))
+        experiment = benchmark_metrics["experiment"]
+        if experiment["injected_failure_runs"] != 21:
+            raise AssertionError("Unexpected injected-failure run count.")
+        if experiment["recovered_failure_runs"] != 5:
+            raise AssertionError("Unexpected recovered-failure run count.")
+        expected_group_rates = {
+            "baseline": 0.875,
+            "evidence_contract": 1 / 3,
+            "verifier_feedback": 1 / 6,
+        }
+        for group, expected in expected_group_rates.items():
+            actual = benchmark_metrics["groups"][group]["rates"]["false_completion_rate"]
+            if abs(actual - expected) > 1e-12:
+                raise AssertionError(f"Unexpected false-completion rate for {group}.")
+        if len(list((output / "raw_traces").glob("*.json"))) != 24:
+            raise AssertionError("Expected 24 raw trace artifacts.")
+        if len(list((output / "envelopes").glob("*.json"))) != 24:
+            raise AssertionError("Expected 24 envelope artifacts.")
 
     print("\nRelease verification passed.")
     return 0
