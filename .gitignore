@@ -31,3 +31,19 @@ ENV/
 .idea/
 .vscode/
 .DS_Store
+
+# Local credentials and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+credentials.json
+credentials.*.json
+secrets.txt
+secrets.json
+
+# Private or live execution artifacts
+private_runs/
+live_runs/
