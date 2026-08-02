@@ -1,0 +1,57 @@
+name: Fifteen consecutive verification passes
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/fifteen-pass-verification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Completion Verifier 15/15 — Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install editable package and build tools
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --editable .
+      - name: Run fifteen consecutive complete cycles
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pass_number in $(seq 1 15); do
+            echo "::group::COMPLETION VERIFIER PASS ${pass_number}/15 — Python ${{ matrix.python-version }}"
+            rm -rf dist build
+            python -m compileall -q src tests scripts
+            python -m unittest discover -s tests -p "test_*.py" -v
+            python scripts/verify_release.py
+            python -m completion_verifier data/cases.jsonl > "/tmp/acv-module-${pass_number}.txt"
+            completion-verifier data/cases.jsonl --json > "/tmp/acv-results-${pass_number}.json"
+            completion-verifier-adapt generic examples/generic_trace.json examples/requirements.json --source-ref "pass-${pass_number}" --envelope > "/tmp/acv-generic-${pass_number}.json"
+            completion-verifier-benchmark --config examples/benchmark_config.json --output "/tmp/acv-benchmark-${pass_number}" > "/tmp/acv-benchmark-${pass_number}.json"
+            completion-verifier-sandbox --config examples/sandbox_config.json --output "/tmp/acv-sandbox-${pass_number}" --scenario all > "/tmp/acv-sandbox-${pass_number}.json"
+            python -m pip wheel . --no-deps --no-build-isolation --wheel-dir dist
+            wheel_env="/tmp/acv-wheel-${{ matrix.python-version }}-${pass_number}"
+            python -m venv "$wheel_env"
+            "$wheel_env/bin/python" -m pip install --disable-pip-version-check --no-deps dist/*.whl
+            "$wheel_env/bin/python" -m completion_verifier data/cases.jsonl > "/tmp/acv-wheel-module-${pass_number}.txt"
+            "$wheel_env/bin/completion-verifier" data/cases.jsonl --json > "/tmp/acv-wheel-results-${pass_number}.json"
+            "$wheel_env/bin/completion-verifier-sandbox" --config examples/sandbox_config.json --output "/tmp/acv-wheel-sandbox-${pass_number}" --scenario all > "/tmp/acv-wheel-sandbox-${pass_number}.json"
+            python -m pip check
+            rm -rf "$wheel_env" dist "/tmp/acv-benchmark-${pass_number}" "/tmp/acv-sandbox-${pass_number}" "/tmp/acv-wheel-sandbox-${pass_number}"
+            echo "::endgroup::"
+          done
+          echo "COMPLETION VERIFIER RESULT — Python ${{ matrix.python-version }}: 15/15 PASSED"
