@@ -12,7 +12,7 @@ from .evaluator import evaluate_case, evaluate_cases
 from .metrics import BenchmarkMetrics, calculate_metrics
 from .models import Case, Event, Evaluation, Requirement, Status
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "AdaptedEvent",
