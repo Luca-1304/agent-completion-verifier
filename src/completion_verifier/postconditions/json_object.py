@@ -4,6 +4,7 @@ import errno
 import json
 import os
 import stat
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,45 @@ def _strict_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _reject_nonstandard_constant(_: str) -> None:
     raise ValueError("Non-standard JSON constant.")
+
+
+def _is_json_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _json_values_match(observed: object, expected: object) -> bool:
+    """Compare normalized JSON values without Python's bool/int equivalence."""
+    if isinstance(observed, bool) or isinstance(expected, bool):
+        return isinstance(observed, bool) and isinstance(expected, bool) and observed is expected
+
+    if observed is None or expected is None:
+        return observed is None and expected is None
+
+    if _is_json_number(observed) or _is_json_number(expected):
+        return _is_json_number(observed) and _is_json_number(expected) and observed == expected
+
+    if isinstance(observed, str) or isinstance(expected, str):
+        return isinstance(observed, str) and isinstance(expected, str) and observed == expected
+
+    if isinstance(observed, list) or isinstance(expected, tuple):
+        if not isinstance(observed, list) or not isinstance(expected, tuple):
+            return False
+        return len(observed) == len(expected) and all(
+            _json_values_match(actual, required)
+            for actual, required in zip(observed, expected)
+        )
+
+    if isinstance(observed, dict) or isinstance(expected, Mapping):
+        if not isinstance(observed, dict) or not isinstance(expected, Mapping):
+            return False
+        if len(observed) != len(expected) or any(key not in observed for key in expected):
+            return False
+        return all(
+            _json_values_match(observed[key], required)
+            for key, required in expected.items()
+        )
+
+    return False
 
 
 def _evidence(
@@ -226,7 +266,8 @@ class JsonObjectVerifier:
 
         keys_present = all(key in parsed for key in contract.expected)
         values_match = keys_present and all(
-            parsed[key] == expected for key, expected in contract.expected.items()
+            _json_values_match(parsed[key], expected)
+            for key, expected in contract.expected.items()
         )
         key_count_matches = len(parsed) == count
         matches = keys_present and values_match and (
