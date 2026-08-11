@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from completion_verifier.postconditions import (
     DirectoryContract,
     JsonObjectContract,
     TextFileContract,
+    TextFileVerifier,
 )
 
 
@@ -127,6 +130,116 @@ class ContractTests(unittest.TestCase):
             JsonObjectContract("state.json", {"": 1})
         with self.assertRaises(ValueError):
             JsonObjectContract("state.json", {1: "value"})  # type: ignore[dict-item]
+
+
+class TextFileVerifierTests(unittest.TestCase):
+    def test_exact_utf8_match_is_verified_without_exposing_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="PRIVATE_ROOT_SENTINEL-") as directory:
+            root = Path(directory)
+            target = root / "PRIVATE_FILE_NAME.txt"
+            target.write_text("PRIVATE_OBSERVED_TEXT", encoding="utf-8")
+            observation = TextFileVerifier().verify(
+                TextFileContract(
+                    "PRIVATE_FILE_NAME.txt",
+                    "PRIVATE_OBSERVED_TEXT",
+                    contract_id="PRIVATE_TEXT_ID",
+                ),
+                root,
+            )
+            self.assertTrue(observation.trusted)
+            self.assertTrue(observation.matches)
+            self.assertEqual(
+                observation.evidence,
+                {
+                    "exists": True,
+                    "regular_file": True,
+                    "size_matches": True,
+                    "content_matches": True,
+                },
+            )
+            public = json.dumps(observation.to_dict(), sort_keys=True)
+            for secret in (
+                str(root),
+                "PRIVATE_ROOT_SENTINEL",
+                "PRIVATE_FILE_NAME",
+                "PRIVATE_OBSERVED_TEXT",
+                "PRIVATE_TEXT_ID",
+            ):
+                self.assertNotIn(secret, public)
+
+    def test_missing_file_is_trusted_non_match(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            observation = TextFileVerifier().verify(
+                TextFileContract("missing.txt", "expected"), Path(directory)
+            )
+            self.assertTrue(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "missing")
+            self.assertFalse(observation.evidence["exists"])
+
+    def test_content_mismatch_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "result.txt").write_text("actual", encoding="utf-8")
+            observation = TextFileVerifier().verify(
+                TextFileContract("result.txt", "expected"), root
+            )
+            self.assertTrue(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "content_mismatch")
+            self.assertFalse(observation.evidence["content_matches"])
+
+    def test_wrong_final_type_is_trusted_non_match(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "result.txt").mkdir()
+            observation = TextFileVerifier().verify(
+                TextFileContract("result.txt", "expected"), root
+            )
+            self.assertTrue(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "wrong_type")
+            self.assertFalse(observation.evidence["regular_file"])
+
+    def test_parent_symlink_is_untrusted_and_never_followed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root = Path(directory)
+            outside_root = Path(outside)
+            (outside_root / "secret.txt").write_text("PRIVATE_OUTSIDE_TEXT")
+            (root / "link").symlink_to(outside_root, target_is_directory=True)
+            observation = TextFileVerifier().verify(
+                TextFileContract("link/secret.txt", "PRIVATE_OUTSIDE_TEXT"), root
+            )
+            self.assertFalse(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "unsafe_path")
+            self.assertNotIn(
+                "PRIVATE_OUTSIDE_TEXT", json.dumps(observation.to_dict(), sort_keys=True)
+            )
+
+    def test_final_symlink_is_untrusted_and_never_followed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root = Path(directory)
+            outside_file = Path(outside) / "secret.txt"
+            outside_file.write_text("PRIVATE_OUTSIDE_TEXT")
+            (root / "result.txt").symlink_to(outside_file)
+            observation = TextFileVerifier().verify(
+                TextFileContract("result.txt", "PRIVATE_OUTSIDE_TEXT"), root
+            )
+            self.assertFalse(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "unsafe_path")
+
+    def test_symlink_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as real:
+            link = Path(directory) / "root-link"
+            link.symlink_to(Path(real), target_is_directory=True)
+            observation = TextFileVerifier().verify(
+                TextFileContract("result.txt", "expected"), link
+            )
+            self.assertFalse(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "unsafe_path")
 
 
 if __name__ == "__main__":
