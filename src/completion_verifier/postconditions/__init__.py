@@ -6,6 +6,7 @@ from .models import (
     TextFileContract,
     validate_relative_path,
 )
+from .text_file import TextFileVerifier
 
 __all__ = [
     "DirectoryContract",
@@ -13,5 +14,6 @@ __all__ = [
     "PostconditionContract",
     "PostconditionObservation",
     "TextFileContract",
+    "TextFileVerifier",
     "validate_relative_path",
 ]
