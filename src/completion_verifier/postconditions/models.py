@@ -91,7 +91,7 @@ def _canonical_digest(raw: object) -> str:
 def _validate_schema(value: object) -> str:
     schema = _required_text(value, "schema_version")
     if schema != "1":
-        raise ValueError(f"Unsupported schema_version '{schema}'.")
+        raise ValueError("Unsupported schema_version.")
     return schema
 
 
