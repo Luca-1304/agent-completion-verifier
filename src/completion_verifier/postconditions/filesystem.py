@@ -27,12 +27,12 @@ class ObservationRoot:
         portable = validate_relative_path(relative)
         parts = portable.split("/")
         current = self.root
-        for part in parts[:-1]:
+        for index, part in enumerate(parts[:-1]):
             current = current / part
             try:
                 info = os.lstat(current)
             except FileNotFoundError:
-                return current.joinpath(*parts[parts.index(part) + 1 :])
+                return current.joinpath(*parts[index + 1 :])
             except OSError as exc:
                 raise UnsafeObservationPath("unsafe observation path") from exc
             if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
