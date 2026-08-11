@@ -25,6 +25,10 @@ def _strict_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _reject_nonstandard_constant(_: str) -> None:
+    raise ValueError("Non-standard JSON constant.")
+
+
 def _evidence(
     *,
     exists: bool = False,
@@ -170,7 +174,11 @@ class JsonObjectVerifier:
             )
 
         try:
-            parsed = json.loads(text, object_pairs_hook=_strict_object_pairs)
+            parsed = json.loads(
+                text,
+                object_pairs_hook=_strict_object_pairs,
+                parse_constant=_reject_nonstandard_constant,
+            )
         except _DuplicateKeyError:
             return PostconditionObservation(
                 kind=contract.kind,
