@@ -1,3 +1,4 @@
+from .directory import DirectoryVerifier
 from .models import (
     DirectoryContract,
     JsonObjectContract,
@@ -10,6 +11,7 @@ from .text_file import TextFileVerifier
 
 __all__ = [
     "DirectoryContract",
+    "DirectoryVerifier",
     "JsonObjectContract",
     "PostconditionContract",
     "PostconditionObservation",
