@@ -171,6 +171,28 @@ a timeout-after-write from actual state; and rejects traversal and symlink
 escapes. It stores source reports, observations, cases and evaluations
 separately. See [`docs/SANDBOX.md`](docs/SANDBOX.md).
 
+## Action Verification SDK
+
+Version 0.7 generalises independent local postcondition checks into a small,
+provider-free Python API. The first built-in verifier kinds cover exact text-file
+state, directory state and structured JSON object state.
+
+```python
+from pathlib import Path
+from completion_verifier import TextFileContract, evaluate_postcondition
+
+contract = TextFileContract("output/result.txt", "ready\n")
+evaluation = evaluate_postcondition(contract, Path("workspace"))
+print(evaluation.status.value)
+```
+
+The SDK is read-only: it performs no network calls, reads no credentials or
+environment variables, and does not execute the action it is judging. Contracts
+may contain sensitive values in memory, but the default public serializers do
+not emit caller-controlled paths, identifiers, file names, JSON keys/values,
+raw content or internal contract digests. See [`docs/POSTCONDITIONS.md`](docs/POSTCONDITIONS.md)
+for the exact privacy and trust boundary.
+
 ## What is tested
 
 The included cases cover:
@@ -181,7 +203,10 @@ The included cases cover:
 - transient failures followed by successful recovery;
 - later failure or rollback overriding earlier success;
 - incorrect actions that do not satisfy the requested task;
-- completion proven by evidence even when the agent did not announce it.
+- completion proven by evidence even when the agent did not announce it;
+- confined text, directory and JSON postcondition verification;
+- symlink/traversal rejection and strict JSON duplicate-key handling;
+- public postcondition evidence that excludes caller-controlled identifiers and content.
 
 See [`RESULTS.md`](RESULTS.md) for the reproducible local result summary and
 [`docs/DESIGN.md`](docs/DESIGN.md) for the evaluation rules.
@@ -189,13 +214,16 @@ See [`RESULTS.md`](RESULTS.md) for the reproducible local result summary and
 ## Scope and limitations
 
 This repository evaluates structured cases, transforms strict source traces,
-and can independently observe a narrow local file postcondition. It does not
-prove remote state, identity, authorization or causal attribution. Production
-use would require trusted event sources, stronger OS isolation, provenance,
-identity and authorization checks, tamper resistance, and domain-specific
-evidence validation.
+and can independently observe three narrow local postcondition kinds. It does
+not prove remote state, remote identity, authorization, causal attribution or
+production safety. A matching local state also does not prove which agent or
+process caused the state change.
 
-The included results come from this deterministic evaluator. They are **not**
+Production use would require trusted event sources, stronger OS isolation,
+provenance, identity and authorization checks, tamper resistance, and
+domain-specific evidence validation.
+
+The included results come from deterministic/local evaluators. They are **not**
 live benchmark results for external AI models, and this project makes no claim
 of modifying model weights or improving model training.
 
@@ -213,7 +241,11 @@ statement.
 
 ## Roadmap
 
-The next research step is to connect a versioned real-agent runner to the confined sandbox while preserving prompts, model settings, raw reports, costs and independent observations. See [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
+After the v0.7 local SDK, the next expansion should be one separately reviewed
+remote-state verifier with its own trust/privacy contract. GitHub pull-request or
+ref verification is the preferred first candidate; real-agent experiments can
+then reuse the same evidence-grounded boundary. See
+[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
 
 ## License
 
