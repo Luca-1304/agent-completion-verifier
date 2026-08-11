@@ -109,7 +109,7 @@ class TextFileVerifier:
             unsafe = exc.errno in {errno.ELOOP, errno.EMLINK}
             return PostconditionObservation(
                 kind=contract.kind,
-                trusted=not unsafe and False,
+                trusted=False,
                 matches=False,
                 evidence=_evidence(exists=True, regular_file=True),
                 reason="unsafe_path" if unsafe else "io_error",
