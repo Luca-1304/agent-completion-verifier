@@ -32,6 +32,7 @@ def run(*command: str, capture: bool = False) -> subprocess.CompletedProcess[str
 def main() -> int:
     run(sys.executable, "-m", "compileall", "-q", "src", "tests", "scripts")
     run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v")
+    run(sys.executable, "scripts/verify_postconditions_release.py")
     run(sys.executable, "-m", "completion_verifier", "data/cases.jsonl")
     run(
         sys.executable,
