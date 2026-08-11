@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from types import MappingProxyType
 from typing import Any, ClassVar
 
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
@@ -74,18 +76,47 @@ def _validate_direct_child(value: object) -> str:
     return child
 
 
-def _canonical_digest(raw: object) -> str:
+def _canonical_json(raw: object) -> str:
     try:
-        encoded = json.dumps(
+        return json.dumps(
             raw,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
             allow_nan=False,
-        ).encode("utf-8")
+        )
     except (TypeError, ValueError) as exc:
         raise ValueError("Contract values must be canonical JSON data.") from exc
-    return hashlib.sha256(encoded).hexdigest()
+
+
+def _canonical_digest(raw: object) -> str:
+    return hashlib.sha256(_canonical_json(raw).encode("utf-8")).hexdigest()
+
+
+def _freeze_json(value: object) -> object:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
+def _clone_and_freeze_json(raw: dict[str, object]) -> Mapping[str, object]:
+    # JSON round-tripping both validates canonical JSON data and severs all
+    # mutable references supplied by the caller before recursively freezing it.
+    cloned = json.loads(_canonical_json(raw))
+    frozen = _freeze_json(cloned)
+    if not isinstance(frozen, Mapping):
+        raise ValueError("'expected' must be an object.")
+    return frozen
 
 
 def _validate_schema(value: object) -> str:
@@ -95,7 +126,7 @@ def _validate_schema(value: object) -> str:
     return schema
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class TextFileContract:
     path: str
     expected_text: str
@@ -109,6 +140,9 @@ class TextFileContract:
             raise ValueError("'expected_text' must be a string.")
         object.__setattr__(self, "contract_id", _required_text(self.contract_id, "contract_id"))
         object.__setattr__(self, "schema_version", _validate_schema(self.schema_version))
+
+    def __repr__(self) -> str:
+        return "TextFileContract()"
 
     @property
     def identity_digest(self) -> str:
@@ -130,7 +164,7 @@ class TextFileContract:
         }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class DirectoryContract:
     path: str
     required_children: tuple[str, ...] = ()
@@ -154,6 +188,9 @@ class DirectoryContract:
         object.__setattr__(self, "contract_id", _required_text(self.contract_id, "contract_id"))
         object.__setattr__(self, "schema_version", _validate_schema(self.schema_version))
 
+    def __repr__(self) -> str:
+        return "DirectoryContract()"
+
     @property
     def identity_digest(self) -> str:
         return _canonical_digest(
@@ -176,10 +213,10 @@ class DirectoryContract:
         }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class JsonObjectContract:
     path: str
-    expected: dict[str, object]
+    expected: Mapping[str, object]
     exact_keys: bool = False
     contract_id: str = "postcondition"
     schema_version: str = "1"
@@ -193,11 +230,12 @@ class JsonObjectContract:
             raise ValueError("Expected JSON keys must be non-empty strings.")
         if not isinstance(self.exact_keys, bool):
             raise ValueError("'exact_keys' must be boolean.")
-        expected = dict(self.expected)
-        _canonical_digest(expected)
-        object.__setattr__(self, "expected", expected)
+        object.__setattr__(self, "expected", _clone_and_freeze_json(dict(self.expected)))
         object.__setattr__(self, "contract_id", _required_text(self.contract_id, "contract_id"))
         object.__setattr__(self, "schema_version", _validate_schema(self.schema_version))
+
+    def __repr__(self) -> str:
+        return "JsonObjectContract()"
 
     @property
     def identity_digest(self) -> str:
@@ -207,7 +245,7 @@ class JsonObjectContract:
                 "kind": self.kind,
                 "contract_id": self.contract_id,
                 "path": self.path,
-                "expected": self.expected,
+                "expected": _thaw_json(self.expected),
                 "exact_keys": self.exact_keys,
             }
         )
