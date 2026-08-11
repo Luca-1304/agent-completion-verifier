@@ -7,6 +7,7 @@ from pathlib import Path
 
 from completion_verifier.postconditions import (
     DirectoryContract,
+    DirectoryVerifier,
     JsonObjectContract,
     TextFileContract,
     TextFileVerifier,
@@ -240,6 +241,109 @@ class TextFileVerifierTests(unittest.TestCase):
             self.assertFalse(observation.trusted)
             self.assertFalse(observation.matches)
             self.assertEqual(observation.reason, "unsafe_path")
+
+
+class DirectoryVerifierTests(unittest.TestCase):
+    def test_existing_directory_matches_without_listing_contents(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="PRIVATE_DIR_ROOT-") as directory:
+            root = Path(directory)
+            target = root / "PRIVATE_TARGET_DIR"
+            target.mkdir()
+            (target / "PRIVATE_UNDECLARED_CHILD").write_text("PRIVATE_CHILD_CONTENT")
+            observation = DirectoryVerifier().verify(
+                DirectoryContract("PRIVATE_TARGET_DIR", contract_id="PRIVATE_DIR_ID"), root
+            )
+            self.assertTrue(observation.trusted)
+            self.assertTrue(observation.matches)
+            public = json.dumps(observation.to_dict(), sort_keys=True)
+            for secret in (
+                str(root),
+                "PRIVATE_TARGET_DIR",
+                "PRIVATE_UNDECLARED_CHILD",
+                "PRIVATE_CHILD_CONTENT",
+                "PRIVATE_DIR_ID",
+            ):
+                self.assertNotIn(secret, public)
+
+    def test_required_children_are_checked_without_serializing_names(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "output"
+            target.mkdir()
+            (target / "PRIVATE_REQUIRED_A").write_text("a")
+            (target / "PRIVATE_REQUIRED_B").mkdir()
+            contract = DirectoryContract(
+                "output",
+                required_children=("PRIVATE_REQUIRED_A", "PRIVATE_REQUIRED_B"),
+            )
+            observation = DirectoryVerifier().verify(contract, root)
+            self.assertTrue(observation.matches)
+            self.assertTrue(observation.evidence["required_children_present"])
+            public = json.dumps(observation.to_dict(), sort_keys=True)
+            self.assertNotIn("PRIVATE_REQUIRED_A", public)
+            self.assertNotIn("PRIVATE_REQUIRED_B", public)
+
+    def test_missing_required_child_is_non_match(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "output").mkdir()
+            observation = DirectoryVerifier().verify(
+                DirectoryContract("output", required_children=("required.txt",)), root
+            )
+            self.assertTrue(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "required_children_missing")
+            self.assertFalse(observation.evidence["required_children_present"])
+
+    def test_exact_empty_accepts_empty_and_rejects_non_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "output"
+            target.mkdir()
+            contract = DirectoryContract("output", exact_empty=True)
+            empty = DirectoryVerifier().verify(contract, root)
+            self.assertTrue(empty.matches)
+            self.assertTrue(empty.evidence["empty"])
+            (target / "PRIVATE_ENTRY").write_text("x")
+            non_empty = DirectoryVerifier().verify(contract, root)
+            self.assertFalse(non_empty.matches)
+            self.assertFalse(non_empty.evidence["empty"])
+            self.assertEqual(non_empty.reason, "not_empty")
+            self.assertNotIn("PRIVATE_ENTRY", json.dumps(non_empty.to_dict()))
+
+    def test_missing_directory_is_trusted_non_match(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            observation = DirectoryVerifier().verify(
+                DirectoryContract("missing"), Path(directory)
+            )
+            self.assertTrue(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "missing")
+
+    def test_file_at_directory_path_is_wrong_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "output").write_text("x")
+            observation = DirectoryVerifier().verify(DirectoryContract("output"), root)
+            self.assertTrue(observation.trusted)
+            self.assertFalse(observation.matches)
+            self.assertEqual(observation.reason, "wrong_type")
+            self.assertFalse(observation.evidence["directory"])
+
+    def test_directory_symlinks_are_untrusted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root = Path(directory)
+            (root / "link").symlink_to(Path(outside), target_is_directory=True)
+            final = DirectoryVerifier().verify(DirectoryContract("link"), root)
+            self.assertFalse(final.trusted)
+            self.assertFalse(final.matches)
+            self.assertEqual(final.reason, "unsafe_path")
+            (root / "parent").mkdir()
+            (root / "parent" / "link").symlink_to(Path(outside), target_is_directory=True)
+            nested = DirectoryVerifier().verify(DirectoryContract("parent/link/child"), root)
+            self.assertFalse(nested.trusted)
+            self.assertFalse(nested.matches)
+            self.assertEqual(nested.reason, "unsafe_path")
 
 
 if __name__ == "__main__":
