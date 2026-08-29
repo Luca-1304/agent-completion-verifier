@@ -17,6 +17,7 @@ _KINDS = frozenset({"pull_request"})
 _MISMATCH_REASONS = frozenset(
     {
         "repository_identity_mismatch",
+        "pull_request_mismatch",
         "head_mismatch",
         "head_repository_mismatch",
         "base_mismatch",
@@ -40,6 +41,7 @@ _REASON_CODES = frozenset({"matched"}) | _MISMATCH_REASONS | _INDETERMINATE_REAS
 _EVIDENCE_KEYS = frozenset(
     {
         "repository_identity_matches",
+        "pull_request_matches",
         "head_matches",
         "head_repository_matches",
         "base_matches",
