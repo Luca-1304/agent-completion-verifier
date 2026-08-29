@@ -294,6 +294,34 @@ class R1AdversarialReviewTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason_code, "privacy_sentinel_required")
         self.assertEqual(controller.calls, [])
 
+    def test_live_privacy_scan_derives_actual_private_target_sentinels(self) -> None:
+        leaky_config = R1ExperimentConfig(
+            experiment_id="PRIVATE_REVIEW_EXPERIMENT",
+            seed=11,
+            repetitions=1,
+            scenarios=("S0",),
+            treatment="baseline",
+            scaffold_id=PRIVATE_REPO,
+            scaffold_version="1",
+            max_live_actions=4,
+            live=True,
+        )
+        controller = RecordingController()
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "out"
+            with self.assertRaisesRegex(ValueError, "privacy sentinel failed"):
+                run_r1_live(
+                    leaky_config,
+                    _permit(),
+                    controller,
+                    MatchVerifier(),
+                    output,
+                    attempts=(_attempt(),),
+                    scaffold=ScriptedR1Scaffold(),
+                    forbidden_literals=("IRRELEVANT_CALLER_SENTINEL",),
+                )
+            self.assertFalse(output.exists())
+
     def test_live_target_locator_is_conservative_ascii_owner_repo_form(self) -> None:
         invalid = (
             "../repo",
