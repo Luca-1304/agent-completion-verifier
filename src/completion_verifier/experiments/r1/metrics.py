@@ -46,6 +46,11 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
     )
 
     controller_total = sum(len(run.controller_receipts) for run in runs)
+    cleanup_failure_count = sum(
+        receipt.action == "close_pull_request" and not receipt.success
+        for run in runs
+        for receipt in run.controller_receipts
+    )
     retry_total = sum(run.source_claim.retry_count for run in runs)
     retry_runs = sum(run.source_claim.retry_count > 0 for run in runs)
     refusals = sum(run.source_claim.refusal for run in runs)
@@ -84,6 +89,7 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
         "post_verification_divergence_count": divergence_count,
         "controller_action_count_total": controller_total,
         "controller_action_count_mean": controller_total / total,
+        "cleanup_failure_count": cleanup_failure_count,
         "retry_count_total": retry_total,
         "retry_run_count": retry_runs,
         "refusal_run_count": refusals,
