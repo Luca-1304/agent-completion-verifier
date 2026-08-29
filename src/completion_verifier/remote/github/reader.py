@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
 import time
 from datetime import timezone
 from email.utils import parsedate_to_datetime
@@ -128,14 +129,17 @@ class GitHubRESTReader:
         connection_factory: Callable[..., object] | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
-            raise ValueError("'timeout_seconds' must be positive.")
+        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):
+            raise ValueError("'timeout_seconds' must be a finite positive number.")
+        timeout = float(timeout_seconds)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("'timeout_seconds' must be a finite positive number.")
         if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int) or max_response_bytes <= 0:
             raise ValueError("'max_response_bytes' must be a positive integer.")
         if not callable(clock):
             raise ValueError("'clock' must be callable.")
         self._credential_provider = credential_provider
-        self._timeout_seconds = float(timeout_seconds)
+        self._timeout_seconds = timeout
         self._max_response_bytes = max_response_bytes
         self._connection_factory = connection_factory or http.client.HTTPSConnection
         self._clock = clock
