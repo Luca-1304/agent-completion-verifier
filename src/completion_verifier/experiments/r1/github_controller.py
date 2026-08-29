@@ -129,6 +129,10 @@ class GitHubR1Controller:
     def __repr__(self) -> str:
         return "GitHubR1Controller()"
 
+    def is_bound_to(self, target: R1LiveTarget) -> bool:
+        """Return only whether this writer is bound to the supplied approved target."""
+        return isinstance(target, R1LiveTarget) and self._target == target
+
     def _failed(self, action: str, code: str) -> R1ControllerReceipt:
         return R1ControllerReceipt(
             action=action,
