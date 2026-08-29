@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
@@ -100,8 +101,11 @@ def verify_github_pull_request(
     snapshot = result.snapshot
     current_time = now()
     if isinstance(current_time, bool) or not isinstance(current_time, (int, float)):
-        raise ValueError("Verification clock must return a numeric timestamp.")
-    fresh = _fresh(snapshot, float(current_time))
+        raise ValueError("Verification clock must return a finite numeric timestamp.")
+    current_timestamp = float(current_time)
+    if not math.isfinite(current_timestamp):
+        raise ValueError("Verification clock must return a finite numeric timestamp.")
+    fresh = _fresh(snapshot, current_timestamp)
     if not fresh:
         return RemoteObservation(
             provider="github",
