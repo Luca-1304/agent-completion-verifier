@@ -34,6 +34,7 @@ def main() -> int:
     run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v")
     run(sys.executable, "scripts/verify_postconditions_release.py")
     run(sys.executable, "scripts/verify_remote_release.py")
+    run(sys.executable, "scripts/verify_r1_release.py")
     run(sys.executable, "-m", "completion_verifier", "data/cases.jsonl")
     run(
         sys.executable,
