@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,7 +25,13 @@ R1_CONTROLLER_ERROR_CODES = (
     "provider_unavailable",
     "authentication_failed",
     "permission_unverified",
+    "rate_limited",
+    "resource_conflict",
+    "validation_failed",
+    "redirect_rejected",
+    "invalid_provider_response",
 )
+_PRIVATE_OID_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 
 
 def _text(value: object, name: str) -> str:
@@ -36,6 +43,18 @@ def _text(value: object, name: str) -> str:
 def _nonnegative_int(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"'{name}' must be a non-negative integer.")
+    return value
+
+
+def _private_oid(value: object, name: str) -> str:
+    if not isinstance(value, str) or not _PRIVATE_OID_RE.fullmatch(value):
+        raise ValueError(f"'{name}' must be a 40- or 64-character hexadecimal object ID.")
+    return value.lower()
+
+
+def _positive_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"'{name}' must be a positive integer.")
     return value
 
 
@@ -141,6 +160,8 @@ class R1ControllerReceipt:
     action_cost: int
     error_code: str | None = None
     private_target_ref: str | None = None
+    private_object_oid: str | None = None
+    private_pull_number: int | None = None
     schema_version: str = "1"
 
     def __post_init__(self) -> None:
@@ -160,6 +181,22 @@ class R1ControllerReceipt:
                 "private_target_ref",
                 _text(self.private_target_ref, "private_target_ref"),
             )
+        if self.private_object_oid is not None:
+            object.__setattr__(
+                self,
+                "private_object_oid",
+                _private_oid(self.private_object_oid, "private_object_oid"),
+            )
+        if self.private_pull_number is not None:
+            object.__setattr__(
+                self,
+                "private_pull_number",
+                _positive_int(self.private_pull_number, "private_pull_number"),
+            )
+        if not self.success and (
+            self.private_object_oid is not None or self.private_pull_number is not None
+        ):
+            raise ValueError("Failed controller receipts cannot retain provider object identifiers.")
         if self.schema_version != "1":
             raise ValueError("Unsupported R1 controller-receipt schema version.")
 
