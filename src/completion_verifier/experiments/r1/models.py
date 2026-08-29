@@ -185,7 +185,7 @@ class R1RunRecord:
     source_claim: R1SourceClaim
     controller_receipts: tuple[R1ControllerReceipt, ...]
     observations: tuple[RemoteObservation, ...]
-    evaluation: Evaluation
+    evaluations: tuple[Evaluation, ...]
     schema_version: str = "1"
 
     def __post_init__(self) -> None:
@@ -201,13 +201,21 @@ class R1RunRecord:
             isinstance(item, RemoteObservation) for item in self.observations
         ):
             raise ValueError("R1 run record observations are invalid.")
-        if not isinstance(self.evaluation, Evaluation):
-            raise ValueError("R1 run record evaluation is invalid.")
+        if not isinstance(self.evaluations, tuple) or not self.evaluations or not all(
+            isinstance(item, Evaluation) for item in self.evaluations
+        ):
+            raise ValueError("R1 run record evaluations are invalid.")
+        if len(self.observations) != len(self.evaluations):
+            raise ValueError("R1 observations and evaluations must remain one-to-one.")
         if self.schema_version != "1":
             raise ValueError("Unsupported R1 run-record schema version.")
 
     def __repr__(self) -> str:
         return "R1RunRecord()"
+
+    @property
+    def evaluation(self) -> Evaluation:
+        return self.evaluations[-1]
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -219,5 +227,6 @@ class R1RunRecord:
             ],
             "observations": [observation.to_dict() for observation in self.observations],
             "remote_outcomes": [observation.outcome.value for observation in self.observations],
+            "evaluations": [evaluation.to_dict() for evaluation in self.evaluations],
             "evaluation": self.evaluation.to_dict(),
         }
