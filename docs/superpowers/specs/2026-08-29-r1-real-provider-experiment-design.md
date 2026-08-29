@@ -1,8 +1,9 @@
 # R1 Real-Provider Experiment Design
 
 Date: 2026-08-29
-Status: design-approved direction; implementation gated on this written spec review
+Status: design-approved direction; implementation gated on written-spec review
 Baseline: agent-completion-verifier v0.8.0 at `4dae08f0f48079b20a8e3c843a8603af8c13bae6`
+Preserved checkpoint branch: `checkpoint/v0.8.0-verified`
 
 ## 1. Purpose
 
@@ -20,7 +21,7 @@ R1 does not attempt to prove causality, user authorization, permanent state, Git
 
 R1 uses a stricter protocol than the v0.8 implementation cycle.
 
-1. Freeze an immutable development checkpoint for v0.8 before experiment work.
+1. Preserve a dedicated verified v0.8 checkpoint branch before experiment work. A formal tag/release remains separate housekeeping until the available GitHub client exposes safe creation support.
 2. Separate product code from the disposable experimental target.
 3. Separate the actor/controller trust path from the verifier trust path.
 4. Define adversarial conditions before live execution.
@@ -73,9 +74,18 @@ Credentials, repository locators, pull-request numbers, object IDs, account name
 
 ### 4.2 Actor/controller interface
 
-A `GitHubExperimentController` is the only component permitted to alter the disposable target state.
+A `GitHubExperimentController` is the only experiment component permitted to alter the disposable target state.
 
-Its interface is capability-minimal and scenario-driven. Initial R1 capabilities may include only those necessary to set up or mutate a disposable pull-request state for the declared scenario, such as creating a disposable branch/PR or changing the PR's state. The exact capability list must be fixed before implementation and tested to reject undeclared mutation methods.
+The initial R1 controller capability set is fixed to exactly four mutation classes:
+
+1. create a branch under a reserved R1 branch prefix from a reviewed base ref;
+2. create or replace one fixture file under a reserved R1 fixture path on that reserved branch;
+3. create a pull request from the reserved R1 branch into the reviewed base branch;
+4. close that R1 pull request.
+
+The initial controller must not expose merge, reopen, delete-branch, delete-repository, issue, comment, release, workflow, settings, secret, collaborator, protection-rule, force-push, arbitrary-ref-update, or arbitrary-file mutation capabilities.
+
+Every write is additionally bound to the preflight-approved target repository ID, reserved branch prefix, fixture path and action budget. A scenario that requires a capability outside this fixed set must trigger a new design review rather than dynamically expanding the controller.
 
 The controller is not trusted as evidence. Its receipts are source-agent/controller records only.
 
@@ -154,17 +164,19 @@ Live execution is disabled by default.
 
 A preflight function must validate all of the following before any controller mutation is allowed:
 
-- experiment code is running in explicit live mode;
-- target repository is positively identified as the disposable/research target;
-- target repository is not on the protected-repository denylist;
+- explicit live mode was supplied through the caller API, not discovered implicitly;
+- target repository stable numeric ID matches the separately supplied disposable/research target ID;
+- target repository ID is not on the protected-repository denylist;
+- target repository locator is consistent with the approved repository ID;
+- reserved branch prefix and fixture path match fixed R1 policy;
 - configured maximum live actions is finite, positive, and not exceeded;
-- controller capability set exactly matches the scenario's allowlist;
+- controller capability set exactly matches the scenario's allowlist and the fixed R1 controller surface;
 - verifier credential/provider is available separately from experiment configuration;
 - artifact destination is empty/new and writable;
 - public artifact policy passes a sentinel leak test;
 - scenario is one of the reviewed R1 scenarios;
-- no normal-CI or dry-run flag is present;
-- required rollback/cleanup plan is defined for mutating scenarios.
+- execution context is not normal CI and dry-run is false;
+- required cleanup plan is defined for every mutating scenario.
 
 Any failed or ambiguous preflight item aborts before mutation.
 
@@ -218,11 +230,9 @@ Expected verifier result: `INDETERMINATE`.
 
 ### S7: temporary satisfaction followed by rollback
 
-The contract is satisfied at one observation point, then the target state is deliberately changed after that point according to the scenario plan.
+The contract is satisfied at an initial observation point. The controller then performs one explicit, scenario-authorized state change, such as closing an expected-open R1 pull request. The harness then performs one explicit second verifier read.
 
-R1 records the first result and a separately scheduled second observation inside the experiment run. This is an experiment-only temporal measurement, not a change to v0.8's single-snapshot semantics.
-
-The experiment must never rewrite a prior `MATCH`; it records later divergence as a separate observation/event.
+This is a sequential experiment step, not a timer, background task, poll loop, monitor or automatic retry. The experiment records both observations separately and never rewrites the earlier `MATCH`.
 
 ### S8: malformed/provider ambiguity
 
@@ -262,7 +272,7 @@ Recommended pilot order:
 2. S1 false success;
 3. S2 wrong head;
 4. S5 permission/auth ambiguity if safe to configure;
-5. one rollback observation from S7.
+5. one explicit rollback/re-read sequence from S7.
 
 Only after pilot review should repetitions increase and the full R1 scenario matrix run.
 
@@ -340,16 +350,19 @@ Before production experiment code exists, tests must define:
 
 - config validation and immutable/private identifiers;
 - controller/verifier interface separation;
+- exact four-class mutation surface and rejection of undeclared capabilities;
+- reserved branch/fixture-path restrictions;
 - dry-run as the default;
 - live-mode preflight abort paths;
 - protected-repository denylist behavior;
+- target stable-ID binding;
 - exact scenario capability allowlists;
 - maximum live-action budget;
 - source receipt cannot forge independent evidence;
 - public artifact sentinel privacy tests;
 - manifest integrity;
 - scenario outcome mapping;
-- S7 second-observation semantics;
+- S7 explicit second-observation semantics;
 - no network/mutation from normal CI;
 - no automatic background monitoring;
 - no new runtime dependency unless separately reviewed.
@@ -423,11 +436,12 @@ The next version must cite the R1 evidence that motivates it.
 
 R1 design/implementation is complete only when:
 
-- v0.8 baseline checkpoint is preserved;
+- v0.8 baseline checkpoint branch is preserved;
 - this design and its implementation plan are reviewed;
 - dry-run harness is deterministic and normal-CI safe;
 - no live mutation can occur without explicit preflight success;
 - actor/controller and verifier evidence paths are separate;
+- controller mutation surface is restricted to the fixed R1 capabilities;
 - initial adversarial scenario suite is implemented;
 - public artifact privacy and manifest integrity gates pass;
 - full exact-head engineering protocol passes;
