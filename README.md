@@ -193,6 +193,27 @@ not emit caller-controlled paths, identifiers, file names, JSON keys/values,
 raw content or internal contract digests. See [`docs/POSTCONDITIONS.md`](docs/POSTCONDITIONS.md)
 for the exact privacy and trust boundary.
 
+## Authenticated GitHub remote-state verification
+
+Version 0.8 adds one narrow authenticated, read-only GitHub pull-request
+verifier. It independently reads the target PR through GitHub's HTTPS API and
+checks the stable target repository ID, pull-request number, head object ID,
+base ref, declared open/closed/merged state, and optional head-repository or
+post-merge object identity.
+
+Provider ambiguity is kept distinct from contradiction: authentication,
+permission, rate-limit, network, redirect, malformed-response or freshness
+uncertainty maps to `UNVERIFIED`; a fresh authenticated contradiction maps to
+`FAILED`; and an exact trusted match maps through the existing evaluator to
+`VERIFIED_COMPLETE`.
+
+The built-in reader is GET-only, performs no automatic retry or polling, adds no
+third-party runtime dependency, and discovers no credentials from environment
+variables or local secret stores. Credentials and caller-controlled remote
+identifiers are excluded from default public evidence. See
+[`docs/REMOTE_GITHUB.md`](docs/REMOTE_GITHUB.md) for the exact trust, privacy and
+freshness boundary.
+
 ## What is tested
 
 The included cases cover:
@@ -206,7 +227,11 @@ The included cases cover:
 - completion proven by evidence even when the agent did not announce it;
 - confined text, directory and JSON postcondition verification;
 - symlink/traversal rejection and strict JSON duplicate-key handling;
-- public postcondition evidence that excludes caller-controlled identifiers and content.
+- public postcondition evidence that excludes caller-controlled identifiers and content;
+- authenticated GitHub PR match, mismatch and indeterminate outcomes;
+- repository/head/base/state identity checks and merge-state consistency;
+- fail-closed GitHub auth, permission, rate-limit, redirect, network and malformed-response handling;
+- remote public evidence that excludes credentials and private provider identifiers.
 
 See [`RESULTS.md`](RESULTS.md) for the reproducible local result summary and
 [`docs/DESIGN.md`](docs/DESIGN.md) for the evaluation rules.
@@ -214,18 +239,23 @@ See [`RESULTS.md`](RESULTS.md) for the reproducible local result summary and
 ## Scope and limitations
 
 This repository evaluates structured cases, transforms strict source traces,
-and can independently observe three narrow local postcondition kinds. It does
-not prove remote state, remote identity, authorization, causal attribution or
-production safety. A matching local state also does not prove which agent or
-process caused the state change.
+independently observes three narrow local postcondition kinds, and can verify one
+narrow class of authenticated GitHub pull-request state at observation time.
+That remote match proves only what the trusted GitHub API reported for the
+declared contract at that moment. It does not prove causality, user
+authorization, intent, permanence, GitHub's own integrity, or production safety.
+A matching local state likewise does not prove which agent or process caused the
+state change.
 
-Production use would require trusted event sources, stronger OS isolation,
-provenance, identity and authorization checks, tamper resistance, and
-domain-specific evidence validation.
+Production use would require stronger OS isolation and tamper resistance plus
+system-specific provenance, identity, authorization and causal-linkage controls.
+Temporal re-verification is also required where later rollback or revocation
+matters.
 
-The included results come from deterministic/local evaluators. They are **not**
-live benchmark results for external AI models, and this project makes no claim
-of modifying model weights or improving model training.
+The included benchmark results remain deterministic/local rather than live
+external-model performance results. The v0.8 remote release tests use fake
+readers/transports and make no real-provider reliability claim. This project
+makes no claim of modifying model weights or improving model training.
 
 ## Authorship and AI assistance
 
@@ -241,10 +271,11 @@ statement.
 
 ## Roadmap
 
-After the v0.7 local SDK, the next expansion should be one separately reviewed
-remote-state verifier with its own trust/privacy contract. GitHub pull-request or
-ref verification is the preferred first candidate; real-agent experiments can
-then reuse the same evidence-grounded boundary. See
+With the v0.8 GitHub remote-state verifier implemented, the next research step
+is a separately gated experiment in a disposable/research repository: compare an
+agent's completion claim with the independent provider observation, inject
+false-success and mismatch conditions, then repeat across independently
+implemented agent scaffolds before making comparative reliability claims. See
 [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
 
 ## License
