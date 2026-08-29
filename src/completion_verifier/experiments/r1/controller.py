@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Protocol
 
@@ -59,7 +60,12 @@ class R1Controller(Protocol):
     def create_branch(self, base_oid: str, branch_name: str) -> R1ControllerReceipt: ...
 
     def write_fixture(
-        self, branch_name: str, relative_path: str, content: str
+        self,
+        branch_name: str,
+        relative_path: str,
+        content: str,
+        *,
+        existing_blob_sha: str | None = None,
     ) -> R1ControllerReceipt: ...
 
     def create_pull_request(
@@ -73,27 +79,39 @@ class DryRunR1Controller:
     """Validation-only controller used by tests, previews, and normal CI."""
 
     def create_branch(self, base_oid: str, branch_name: str) -> R1ControllerReceipt:
-        _validate_oid(base_oid)
+        oid = _validate_oid(base_oid)
         branch = validate_r1_branch_name(branch_name)
         return R1ControllerReceipt(
             action="create_branch",
             success=True,
             action_cost=1,
             private_target_ref=branch,
+            private_object_oid=oid,
         )
 
     def write_fixture(
-        self, branch_name: str, relative_path: str, content: str
+        self,
+        branch_name: str,
+        relative_path: str,
+        content: str,
+        *,
+        existing_blob_sha: str | None = None,
     ) -> R1ControllerReceipt:
         branch = validate_r1_branch_name(branch_name)
         path = validate_r1_fixture_path(relative_path)
         if not isinstance(content, str) or not content:
             raise ValueError("Fixture content must be a non-empty string.")
+        existing = None
+        if existing_blob_sha is not None:
+            existing = _validate_oid(existing_blob_sha)
+        material = f"{branch}\0{path}\0{content}\0{existing or ''}".encode("utf-8")
+        synthetic_oid = hashlib.sha256(material).hexdigest()
         return R1ControllerReceipt(
             action="write_fixture",
             success=True,
             action_cost=1,
             private_target_ref=f"{branch}:{path}",
+            private_object_oid=synthetic_oid,
         )
 
     def create_pull_request(
@@ -106,6 +124,7 @@ class DryRunR1Controller:
             success=True,
             action_cost=1,
             private_target_ref=f"{branch}:{base}",
+            private_pull_number=1,
         )
 
     def close_pull_request(self, pull_number: int) -> R1ControllerReceipt:
@@ -115,4 +134,5 @@ class DryRunR1Controller:
             success=True,
             action_cost=1,
             private_target_ref=str(number),
+            private_pull_number=number,
         )
