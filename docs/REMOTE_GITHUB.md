@@ -23,7 +23,10 @@ A `GitHubPullRequestContract` can require:
 
 The human-readable `owner/name` locator is private addressing data. Target
 repository identity is checked against GitHub's `base.repo.id`; the pull
-request's top-level database `id` is not used as repository identity.
+request's top-level database `id` is not used as repository identity. The pull
+request number returned by the provider is also compared with the declared
+contract rather than being trusted solely because it appeared in the request
+path.
 
 ## Trust and authentication
 
@@ -32,9 +35,18 @@ supplies a credential provider explicitly. The SDK does not discover secrets
 from environment variables, `.env` files, credential helpers, or local secret
 stores.
 
+For GitHub's `GET /repos/{owner}/{repo}/pulls/{pull_number}` endpoint, a
+fine-grained token can use either **Pull requests: read** or **Contents: read**
+repository permission. GitHub also permits unauthenticated reads of public
+resources, but v0.8 deliberately still requires an explicit credential because
+its trust contract is an authenticated provider observation. A `404` is not
+interpreted as proof of absence because insufficient access to private resources
+can also produce `404`.
+
 The reader performs one HTTPS `GET` against `api.github.com` for the target pull
-request. It does not follow redirects, retry automatically, poll in the
-background, or expose mutation methods.
+request. It pins the supported GitHub REST API version `2022-11-28`. It does not
+follow redirects, retry automatically, poll in the background, or expose
+mutation methods. Transport timeout values must be finite and positive.
 
 Normal CI uses fake readers/transports and requires no real GitHub credential.
 
@@ -69,7 +81,8 @@ The verifier judges state at observation time. The v0.8 policy requires:
   request finish.
 
 A missing provider `Date` does not by itself invalidate an otherwise fresh local
-observation.
+observation. Non-finite verifier clock values are rejected rather than allowed
+to bypass freshness comparisons.
 
 ## Privacy-safe public evidence
 
