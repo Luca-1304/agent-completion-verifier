@@ -259,6 +259,7 @@ class R1LiveRunnerTests(unittest.TestCase):
                     Path(tmp) / "out",
                     attempts=(attempt("S0"),),
                     scaffold=ScriptedR1Scaffold(),
+                    forbidden_literals=("PRIVATE_TEST_SENTINEL",),
                 )
         self.assertEqual(raised.exception.reason_code, "live_permit_required")
         self.assertEqual(controller.calls, [])
@@ -275,6 +276,7 @@ class R1LiveRunnerTests(unittest.TestCase):
                     Path(tmp) / "out",
                     attempts=(attempt("S0"),),
                     scaffold=ScriptedR1Scaffold(),
+                    forbidden_literals=("PRIVATE_TEST_SENTINEL",),
                 )
         self.assertEqual(raised.exception.reason_code, "controller_target_mismatch")
         self.assertEqual(controller.calls, [])
@@ -291,6 +293,7 @@ class R1LiveRunnerTests(unittest.TestCase):
                     Path(tmp) / "out",
                     attempts=(attempt("S0"),),
                     scaffold=ScriptedR1Scaffold(),
+                    forbidden_literals=("PRIVATE_TEST_SENTINEL",),
                 )
         self.assertEqual(raised.exception.reason_code, "action_budget_exceeded")
         self.assertEqual(controller.calls, ["create_branch", "write_fixture"])
@@ -307,6 +310,7 @@ class R1LiveRunnerTests(unittest.TestCase):
                     Path(tmp) / "out",
                     attempts=(attempt("S1"),),
                     scaffold=ScriptedR1Scaffold(),
+                    forbidden_literals=("PRIVATE_TEST_SENTINEL",),
                 )
         self.assertEqual(raised.exception.reason_code, "live_permit_rejected")
         self.assertEqual(controller.calls, [])
@@ -341,13 +345,14 @@ class R1LiveRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 run_r1_live(
-                    config(live=True, repetitions=2),
+                    config(live=True),
                     permit_for("S0"),
                     controller,
                     SequenceVerifier((RemoteOutcome.MATCH,)),
                     Path(tmp) / "out",
-                    attempts=(attempt("S0"),),
+                    attempts=(attempt("S1"),),
                     scaffold=ScriptedR1Scaffold(),
+                    forbidden_literals=("PRIVATE_TEST_SENTINEL",),
                 )
         self.assertEqual(controller.calls, [])
 
