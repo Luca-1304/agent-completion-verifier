@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import unittest
 
+from completion_verifier.remote import RemoteOutcome
 from completion_verifier.remote.github import (
     GitHubPullRequestContract,
     GitHubPullRequestSnapshot,
+    GitHubRESTReader,
     GitHubReadResult,
     verify_github_pull_request,
 )
@@ -51,6 +53,11 @@ class FakeReader:
         return GitHubReadResult(snapshot=self._observed)
 
 
+class DummyCredentialProvider:
+    def authorization_header(self) -> str:
+        return "Bearer PRIVATE_TEST_TOKEN"
+
+
 class ReviewRegressionTests(unittest.TestCase):
     def test_snapshot_rejects_open_merged_contradiction(self) -> None:
         with self.assertRaises(ValueError):
@@ -65,6 +72,21 @@ class ReviewRegressionTests(unittest.TestCase):
                     FakeReader(observed),
                     now=lambda current_time=current_time: current_time,
                 )
+
+    def test_pull_request_number_is_part_of_verified_identity(self) -> None:
+        result = verify_github_pull_request(
+            contract(),
+            FakeReader(snapshot(pull_number=23)),
+            now=lambda: NOW,
+        )
+        self.assertEqual(result.outcome, RemoteOutcome.MISMATCH)
+        self.assertEqual(result.reason, "pull_request_mismatch")
+        self.assertFalse(result.evidence["pull_request_matches"])
+
+    def test_reader_timeout_must_be_finite(self) -> None:
+        for timeout in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                GitHubRESTReader(DummyCredentialProvider(), timeout_seconds=timeout)
 
 
 if __name__ == "__main__":
