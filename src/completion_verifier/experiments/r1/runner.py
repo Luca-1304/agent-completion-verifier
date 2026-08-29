@@ -376,7 +376,6 @@ class _GatedR1Controller:
         return receipt
 
 
-
 def preview_r1(
     config: R1ExperimentConfig,
     scenario_definitions: Mapping[str, R1ScenarioDefinition] = R1_SCENARIO_DEFINITIONS,
@@ -554,21 +553,67 @@ def _execute_attempt(
     return run
 
 
+def _automatic_private_literals(
+    config: R1ExperimentConfig,
+    attempts: tuple[R1PreparedAttempt, ...],
+    runs: tuple[R1RunRecord, ...],
+) -> tuple[str, ...]:
+    """Collect private string values already known to the harness in memory.
+
+    Numeric identifiers remain protected by explicit public serializers rather
+    than substring matching, because small numbers can legitimately occur in
+    public counters, seeds, schema versions, and scenario labels.
+    """
+    values: list[str] = [config.experiment_id]
+    for item in attempts:
+        values.extend(
+            (
+                item.target.repository_locator,
+                item.task.base_oid,
+                item.task.branch_name,
+                item.task.fixture_path,
+                item.task.fixture_content,
+                item.task.base_ref,
+            )
+        )
+        if item.expectation.expected_head_oid is not None:
+            values.append(item.expectation.expected_head_oid)
+        if item.expectation.expected_base_ref is not None:
+            values.append(item.expectation.expected_base_ref)
+        if item.expectation.expected_merge_oid is not None:
+            values.append(item.expectation.expected_merge_oid)
+    for run in runs:
+        if run.source_claim.private_trace_ref is not None:
+            values.append(run.source_claim.private_trace_ref)
+        for receipt in run.controller_receipts:
+            if receipt.private_target_ref is not None:
+                values.append(receipt.private_target_ref)
+            if receipt.private_object_oid is not None:
+                values.append(receipt.private_object_oid)
+    return tuple(dict.fromkeys(value for value in values if value))
+
+
 def _result(
     *,
     config: R1ExperimentConfig,
+    attempts: tuple[R1PreparedAttempt, ...],
     runs: tuple[R1RunRecord, ...],
     output_dir: Path,
     live: bool,
     forbidden_literals: tuple[str, ...],
 ) -> R1ExperimentResult:
     metrics = calculate_r1_metrics(runs)
+    effective_forbidden = tuple(
+        dict.fromkeys(
+            forbidden_literals + _automatic_private_literals(config, attempts, runs)
+        )
+    )
     written = write_r1_artifacts(
         output_dir,
         config,
         runs,
         metrics,
-        forbidden_literals=forbidden_literals,
+        forbidden_literals=effective_forbidden,
     )
     verified = verify_r1_manifest(written)
     return R1ExperimentResult(
@@ -610,6 +655,7 @@ def run_r1_dry(
     )
     return _result(
         config=config,
+        attempts=attempts,
         runs=runs,
         output_dir=Path(output_dir),
         live=False,
@@ -682,6 +728,7 @@ def run_r1_live(
     )
     return _result(
         config=config,
+        attempts=attempts,
         runs=runs,
         output_dir=Path(output_dir),
         live=True,
