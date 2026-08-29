@@ -59,6 +59,7 @@ def _build_report(
     metrics: dict[str, object],
 ) -> str:
     scenarios = ", ".join(config.scenarios)
+    cleanup_failures = metrics.get("cleanup_failure_count", 0)
     return (
         "# R1 controlled real-provider experiment\n\n"
         "This artifact set records privacy-minimal experiment output. "
@@ -69,7 +70,7 @@ def _build_report(
         f"- Scenarios: {scenarios}\n"
         f"- Treatment: {config.treatment}\n"
         f"- Scaffold: {config.scaffold_id} {config.scaffold_version}\n"
-        f"- Cleanup failures: {metrics['cleanup_failure_count']}\n"
+        f"- Cleanup failures: {cleanup_failures}\n"
         "\nA verifier MATCH means the reviewed remote contract matched the authenticated "
         "observation at that observation point. It does not prove causality, user "
         "authorization, permanence, provider integrity, or production safety.\n"
