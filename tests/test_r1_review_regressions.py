@@ -129,6 +129,14 @@ class RecordingController:
         )
 
 
+class CleanupFailingController(RecordingController):
+    def close_pull_request(self, pull_number):
+        self.calls.append(("close_pull_request", pull_number))
+        return R1ControllerReceipt(
+            "close_pull_request", False, 1, error_code="provider_unavailable"
+        )
+
+
 class MatchVerifier:
     def verify(self, contract):
         del contract
@@ -201,6 +209,23 @@ class R1AdversarialReviewTests(unittest.TestCase):
             ["create_branch", "write_fixture", "create_pull_request", "close_pull_request"],
         )
         self.assertEqual(controller.calls[-1], ("close_pull_request", 7))
+
+    def test_failed_cleanup_is_headline_visible_in_metrics_and_report(self) -> None:
+        controller = CleanupFailingController()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_r1_live(
+                _config(),
+                _permit(),
+                controller,
+                MatchVerifier(),
+                Path(tmp) / "out",
+                attempts=(_attempt(),),
+                scaffold=ScriptedR1Scaffold(),
+                forbidden_literals=("PRIVATE_REVIEW_SENTINEL",),
+            )
+            self.assertEqual(result.metrics.get("cleanup_failure_count"), 1)
+            report = (result.output_dir / "report.md").read_text(encoding="utf-8")
+            self.assertIn("Cleanup failures: 1", report)
 
     def test_scaffold_cannot_change_the_prepared_branch_before_delegate_call(self) -> None:
         controller = RecordingController()
