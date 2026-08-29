@@ -24,8 +24,22 @@ from .postconditions import (
     postcondition_case,
     verify_postcondition,
 )
+from .remote import (
+    RemoteObservation,
+    RemoteOutcome,
+    evaluate_remote_observation,
+    remote_postcondition_case,
+)
+from .remote.github import (
+    GitHubPullRequestContract,
+    GitHubPullRequestSnapshot,
+    GitHubReadResult,
+    GitHubStateReader,
+    evaluate_github_pull_request,
+    verify_github_pull_request,
+)
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
     "AdaptedEvent",
@@ -36,11 +50,17 @@ __all__ = [
     "Event",
     "Evaluation",
     "GenericJsonTraceAdapter",
+    "GitHubPullRequestContract",
+    "GitHubPullRequestSnapshot",
+    "GitHubReadResult",
+    "GitHubStateReader",
     "JsonObjectContract",
     "JsonObjectVerifier",
     "OpenAIToolTraceAdapter",
     "PostconditionContract",
     "PostconditionObservation",
+    "RemoteObservation",
+    "RemoteOutcome",
     "Requirement",
     "Status",
     "TextFileContract",
@@ -53,7 +73,11 @@ __all__ = [
     "canonical_json_sha256",
     "evaluate_case",
     "evaluate_cases",
+    "evaluate_github_pull_request",
     "evaluate_postcondition",
+    "evaluate_remote_observation",
     "postcondition_case",
+    "remote_postcondition_case",
+    "verify_github_pull_request",
     "verify_postcondition",
 ]
