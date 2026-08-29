@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ...models import Evaluation
+from ...remote.models import RemoteObservation
+
 
 R1_SCENARIOS = ("S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8")
 R1_TREATMENTS = ("baseline", "evidence_contract", "verifier_feedback")
@@ -173,4 +176,48 @@ class R1ControllerReceipt:
             "success": self.success,
             "action_cost": self.action_cost,
             "error_code": self.error_code,
+        }
+
+
+@dataclass(frozen=True, repr=False)
+class R1RunRecord:
+    scenario_id: str
+    source_claim: R1SourceClaim
+    controller_receipts: tuple[R1ControllerReceipt, ...]
+    observations: tuple[RemoteObservation, ...]
+    evaluation: Evaluation
+    schema_version: str = "1"
+
+    def __post_init__(self) -> None:
+        if self.scenario_id not in R1_SCENARIOS:
+            raise ValueError("Unknown R1 scenario.")
+        if not isinstance(self.source_claim, R1SourceClaim):
+            raise ValueError("R1 run record requires a sealed source claim.")
+        if not isinstance(self.controller_receipts, tuple) or not all(
+            isinstance(item, R1ControllerReceipt) for item in self.controller_receipts
+        ):
+            raise ValueError("R1 run record controller receipts are invalid.")
+        if not isinstance(self.observations, tuple) or not self.observations or not all(
+            isinstance(item, RemoteObservation) for item in self.observations
+        ):
+            raise ValueError("R1 run record observations are invalid.")
+        if not isinstance(self.evaluation, Evaluation):
+            raise ValueError("R1 run record evaluation is invalid.")
+        if self.schema_version != "1":
+            raise ValueError("Unsupported R1 run-record schema version.")
+
+    def __repr__(self) -> str:
+        return "R1RunRecord()"
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "scenario_id": self.scenario_id,
+            "source_claim": self.source_claim.to_public_dict(),
+            "controller_receipts": [
+                receipt.to_public_dict() for receipt in self.controller_receipts
+            ],
+            "observations": [observation.to_dict() for observation in self.observations],
+            "remote_outcomes": [observation.outcome.value for observation in self.observations],
+            "evaluation": self.evaluation.to_dict(),
         }
