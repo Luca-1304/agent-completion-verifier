@@ -65,5 +65,41 @@ def evaluate_attempt(
         source_claim=source_claim,
         controller_receipts=controller_receipts,
         observations=(observation,),
-        evaluation=evaluation,
+        evaluations=(evaluation,),
+    )
+
+
+def append_explicit_second_observation(
+    run_record: R1RunRecord,
+    *,
+    contract: GitHubPullRequestContract,
+    verifier: R1Verifier,
+    rollback_receipt: R1ControllerReceipt,
+) -> R1RunRecord:
+    """Append R1's explicit post-rollback read without polling or rewriting history."""
+
+    if not isinstance(run_record, R1RunRecord):
+        raise ValueError("R1 second observation requires an R1RunRecord.")
+    if run_record.scenario_id != "S7":
+        raise ValueError("Explicit second observation is reserved for R1 scenario S7.")
+    if not isinstance(contract, GitHubPullRequestContract):
+        raise ValueError("R1 second observation requires a GitHub pull-request contract.")
+    if not isinstance(rollback_receipt, R1ControllerReceipt):
+        raise ValueError("R1 rollback receipt is invalid.")
+    if rollback_receipt.action != "close_pull_request":
+        raise ValueError("R1 S7 rollback receipt must be a close_pull_request action.")
+
+    observation = verifier.verify(contract)
+    if not isinstance(observation, RemoteObservation):
+        raise ValueError("R1 verifier returned an invalid second observation.")
+    evaluation = evaluate_remote_observation(
+        observation,
+        completion_claimed=run_record.source_claim.completion_claimed,
+    )
+    return R1RunRecord(
+        scenario_id=run_record.scenario_id,
+        source_claim=run_record.source_claim,
+        controller_receipts=run_record.controller_receipts + (rollback_receipt,),
+        observations=run_record.observations + (observation,),
+        evaluations=run_record.evaluations + (evaluation,),
     )
