@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -186,6 +187,7 @@ class R1RunRecord:
     controller_receipts: tuple[R1ControllerReceipt, ...]
     observations: tuple[RemoteObservation, ...]
     evaluations: tuple[Evaluation, ...]
+    verification_latency_ms: tuple[float | None, ...] = ()
     schema_version: str = "1"
 
     def __post_init__(self) -> None:
@@ -207,6 +209,24 @@ class R1RunRecord:
             raise ValueError("R1 run record evaluations are invalid.")
         if len(self.observations) != len(self.evaluations):
             raise ValueError("R1 observations and evaluations must remain one-to-one.")
+        latencies = self.verification_latency_ms
+        if not isinstance(latencies, tuple):
+            raise ValueError("R1 verification latencies must be a tuple.")
+        if not latencies:
+            latencies = tuple(None for _ in self.observations)
+            object.__setattr__(self, "verification_latency_ms", latencies)
+        if len(latencies) != len(self.observations):
+            raise ValueError("R1 verification latencies must align with observations.")
+        for value in latencies:
+            if value is None:
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) < 0
+            ):
+                raise ValueError("R1 verification latency must be finite and non-negative.")
         if self.schema_version != "1":
             raise ValueError("Unsupported R1 run-record schema version.")
 
@@ -229,4 +249,5 @@ class R1RunRecord:
             "remote_outcomes": [observation.outcome.value for observation in self.observations],
             "evaluations": [evaluation.to_dict() for evaluation in self.evaluations],
             "evaluation": self.evaluation.to_dict(),
+            "verification_latency_ms": list(self.verification_latency_ms),
         }
