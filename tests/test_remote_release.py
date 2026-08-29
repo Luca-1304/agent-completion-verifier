@@ -89,6 +89,8 @@ class RemoteReleaseBoundaryTests(unittest.TestCase):
             "does not prove causality",
             "does not prove user authorization",
             "does not guarantee permanence",
+            "Pull requests: read",
+            "Contents: read",
             "privacy",
             "UNVERIFIED",
             "FAILED",
