@@ -558,11 +558,11 @@ def _automatic_private_literals(
     attempts: tuple[R1PreparedAttempt, ...],
     runs: tuple[R1RunRecord, ...],
 ) -> tuple[str, ...]:
-    """Collect private string values already known to the harness in memory.
+    """Collect distinctive private strings already known to the harness.
 
-    Numeric identifiers remain protected by explicit public serializers rather
-    than substring matching, because small numbers can legitimately occur in
-    public counters, seeds, schema versions, and scenario labels.
+    Short generic values and numeric identifiers remain protected by explicit
+    public serializers rather than substring matching, because values such as
+    `main`, `1`, or `7` can legitimately occur in unrelated public output.
     """
     values: list[str] = [config.experiment_id]
     for item in attempts:
@@ -590,7 +590,7 @@ def _automatic_private_literals(
                 values.append(receipt.private_target_ref)
             if receipt.private_object_oid is not None:
                 values.append(receipt.private_object_oid)
-    return tuple(dict.fromkeys(value for value in values if value))
+    return tuple(dict.fromkeys(value for value in values if len(value) >= 8))
 
 
 def _result(
