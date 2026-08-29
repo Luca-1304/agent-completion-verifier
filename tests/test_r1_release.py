@@ -9,6 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 R1_ROOT = ROOT / "src/completion_verifier/experiments/r1"
 
 
+def _normalized_text(path: Path) -> str:
+    return " ".join(path.read_text(encoding="utf-8").lower().split())
+
+
 class R1ReleaseBoundaryTests(unittest.TestCase):
     def test_r1_source_does_not_discover_credentials_from_environment_or_secret_stores(self) -> None:
         forbidden = (
@@ -68,7 +72,7 @@ class R1ReleaseBoundaryTests(unittest.TestCase):
     def test_r1_documentation_states_experimental_and_real_provider_claim_boundary(self) -> None:
         path = ROOT / "docs/R1_EXPERIMENT.md"
         self.assertTrue(path.is_file())
-        text = path.read_text(encoding="utf-8").lower()
+        text = _normalized_text(path)
         for phrase in (
             "experimental",
             "no real-provider reliability claim",
@@ -84,8 +88,8 @@ class R1ReleaseBoundaryTests(unittest.TestCase):
             self.assertIn(phrase, text)
 
     def test_readme_and_roadmap_expose_r1_without_claiming_completed_live_results(self) -> None:
-        readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
-        roadmap = (ROOT / "docs/RESEARCH_ROADMAP.md").read_text(encoding="utf-8").lower()
+        readme = _normalized_text(ROOT / "README.md")
+        roadmap = _normalized_text(ROOT / "docs/RESEARCH_ROADMAP.md")
         self.assertIn("r1", readme)
         self.assertIn("experimental", readme)
         self.assertIn("no real-provider reliability claim", readme)
