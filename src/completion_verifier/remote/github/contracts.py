@@ -110,6 +110,8 @@ class GitHubPullRequestSnapshot:
             raise ValueError("Snapshot state must be open or closed.")
         if not isinstance(self.merged, bool):
             raise ValueError("'merged' must be boolean.")
+        if self.merged and self.state != "closed":
+            raise ValueError("Merged snapshot state must be closed.")
         object.__setattr__(self, "head_oid", _object_id(self.head_oid, "head_oid"))
         if self.head_repository_id is not None:
             object.__setattr__(self, "head_repository_id", _positive_int(self.head_repository_id, "head_repository_id"))
