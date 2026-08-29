@@ -38,7 +38,7 @@ Repository = "https://github.com/Luca-1304/agent-completion-verifier"
 Issues = "https://github.com/Luca-1304/agent-completion-verifier/issues"
 
 [tool.setuptools]
-package-dir = {"" = "src"]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
