@@ -28,7 +28,7 @@ _PREFLIGHT_REASONS = frozenset(
     }
 )
 _PERMIT_KEY = object()
-_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
+_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9])?$")
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
 
