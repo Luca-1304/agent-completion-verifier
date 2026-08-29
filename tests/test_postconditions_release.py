@@ -20,12 +20,12 @@ POSTCONDITION_SOURCE = ROOT / "src" / "completion_verifier" / "postconditions"
 
 
 class ReleaseBoundaryTests(unittest.TestCase):
-    def test_release_version_is_0_7_0_everywhere(self) -> None:
-        self.assertEqual(completion_verifier.__version__, "0.7.0")
+    def test_current_release_version_is_0_8_0_everywhere(self) -> None:
+        self.assertEqual(completion_verifier.__version__, "0.8.0")
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         match = re.search(r'^version = "([^"]+)"$', pyproject, re.MULTILINE)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.7.0")
+        self.assertEqual(match.group(1), "0.8.0")
 
     def test_postcondition_documentation_states_disclosure_boundary(self) -> None:
         doc = ROOT / "docs" / "POSTCONDITIONS.md"
