@@ -9,35 +9,35 @@ Tracking issue: #19
 
 Extend Agent Completion Verifier beyond local postconditions with one independently authenticated, read-only verifier for GitHub pull-request state.
 
-The verifier answers a narrow question:
+The verifier answers one narrow question:
 
 > Did GitHub independently report that the expected pull-request state existed at observation time?
 
-It does not execute the action being judged, mutate GitHub, infer user intent, prove authorization, prove causal attribution, or guarantee that the state will remain true later.
+It does not execute the action being judged, mutate GitHub, infer user intent, prove authorization, prove causal attribution, or guarantee persistence after observation.
 
 ## Why GitHub first
 
-GitHub is the preferred first remote provider because pull-request state is concrete, machine-readable and externally observable without retaining message bodies or other high-sensitivity personal content.
+GitHub pull-request state is concrete, machine-readable and externally observable without retaining message bodies or other high-sensitivity personal content.
 
-The first target is deliberately one narrow contract: a GitHub pull request. Ref, deployment, issue, email, calendar, database and payment verifiers remain out of scope until this boundary is proven.
+The first remote contract is deliberately one pull-request verifier. Ref, deployment, issue, email, calendar, database and payment verifiers remain out of scope until this boundary is proven.
 
-## Architectural choice
+## Architecture
 
 Use an injected read-only provider reader rather than putting authentication and HTTP logic inside the verification engine.
 
 The architecture has five layers:
 
 1. **Private contract** — immutable expected GitHub state.
-2. **Credential boundary** — caller-owned credential provider; the SDK never reads environment variables for secrets.
+2. **Credential boundary** — caller-owned credential provider; no environment-secret discovery in the SDK.
 3. **Read-only GitHub reader** — authenticated GET-only transport that normalizes only fields needed for verification.
 4. **Remote verifier** — compares the private snapshot with the private contract and emits privacy-minimal evidence.
-5. **Existing evaluator adapter** — maps decisive match/mismatch/indeterminate outcomes into the existing evaluator instead of creating a new status engine.
+5. **Existing evaluator adapter** — maps `MATCH`, `MISMATCH`, and `INDETERMINATE` into the existing evaluator instead of creating a second status engine.
 
-This keeps v0.7 local verification unchanged and prevents provider credentials, URLs and raw API payloads from leaking into the core completion model.
+This keeps v0.7 local verification unchanged and keeps credentials, provider URLs and raw API payloads outside the core completion model.
 
 ## Package boundary
 
-Add a separate remote package beside `completion_verifier.postconditions`:
+Add a separate package beside `completion_verifier.postconditions`:
 
 ```text
 completion_verifier/
@@ -52,145 +52,178 @@ completion_verifier/
       verifier.py
 ```
 
-The local `postconditions` package remains provider-free and unchanged.
+`completion_verifier.postconditions` remains provider-free and unchanged.
 
 ## Initial contract
 
-`GitHubPullRequestContract` is immutable and privacy-sensitive. It contains only fields needed to define the expected state:
+`GitHubPullRequestContract` is immutable and privacy-sensitive. It contains:
 
-- private repository locator (`owner/name`) used to address the provider;
-- required stable numeric repository ID;
-- pull-request number;
-- expected head commit SHA;
+- private repository locator (`owner/name`) used only to address GitHub;
+- required stable numeric target repository ID;
+- positive pull-request number;
+- expected head commit object ID;
 - expected base ref;
 - expected state: `open`, `closed`, or `merged`;
-- optional expected merge SHA, valid only when `expected_state="merged"`;
+- optional expected merge object ID, valid only for `merged`;
 - optional expected head-repository ID for cross-repository pull requests.
 
-Repository ID is authoritative for target identity. The human-readable repository locator is only an addressing input and must not substitute for the numeric identity check.
+The numeric target repository ID is authoritative for identity. The human-readable repository locator is an addressing input and never substitutes for the identity check.
 
-Pull numbers and repository IDs must be positive integers. Refs are validated as bounded non-empty strings and reject control characters. Commit IDs accept supported hexadecimal Git object identifiers without silently normalizing arbitrary input.
+Object IDs accept exactly 40- or 64-character ASCII hexadecimal values and are canonicalized to lowercase internally. Refs are bounded non-empty strings and reject control characters. Repository IDs and pull numbers are positive integers.
 
-`repr(contract)` is fixed/static and never contains repository names, IDs, PR numbers, refs or SHAs.
+`repr(contract)` is fixed/static and never contains repository names, IDs, PR numbers, refs or object IDs.
 
 ## Expected-state semantics
 
-A successful provider read is compared exactly:
+A trusted provider snapshot is compared exactly:
 
-- `open` requires provider state `open` and not merged;
-- `closed` requires provider state `closed` and not merged;
-- `merged` requires the provider's merged state to be true;
-- head SHA must match exactly;
-- base ref must match exactly;
-- target repository ID must match exactly;
-- optional head-repository ID must match exactly when declared;
-- optional merge SHA must match GitHub's post-merge `merge_commit_sha` when declared.
+- `open` requires provider state `open` and `merged == false`;
+- `closed` requires provider state `closed` and `merged == false`;
+- `merged` requires `merged == true`;
+- target repository ID must match;
+- head object ID must match;
+- base ref must match;
+- optional head-repository ID must match when declared;
+- optional merge object ID must match GitHub's post-merge `merge_commit_sha` when declared.
 
-The verifier does not use GitHub's `mergeable` field as proof of completion. GitHub documents that `merge_commit_sha` has different semantics before and after merge, so merge-SHA verification is only meaningful after the provider reports the PR as merged.
+The verifier never uses GitHub's `mergeable` field as proof of completion. GitHub documents that `merge_commit_sha` has different semantics before and after merge, so merge-object verification is accepted only after the provider reports the PR as merged.
 
 ## Provider reader
 
 ### Interface
 
-`GitHubStateReader` is an injected protocol. The verifier depends on that protocol, not on HTTP directly.
+`GitHubStateReader` is an injected protocol. The verifier depends on that protocol, not on HTTP.
 
-The built-in implementation, `GitHubRESTReader`, provides the first real provider path and uses GET requests only.
+The built-in `GitHubRESTReader` supplies the first real provider path and returns a strict private `GitHubPullRequestSnapshot`. Raw JSON is never handed to the verifier.
 
-The reader returns a strict private `GitHubPullRequestSnapshot`; it does not return raw JSON to the verifier.
+### Credential boundary
 
-### Authentication
+The caller supplies one explicit credential-provider protocol with an `authorization_header()` operation. Token acquisition and storage are outside this project.
 
-The caller supplies a credential provider object/callable. The SDK does not:
+The SDK does not:
 
 - read `.env` files;
-- read `os.environ`/`os.getenv`;
-- discover local credential stores;
+- read `os.environ` or `os.getenv`;
+- inspect Git credential helpers or local credential stores;
 - persist credentials;
-- include credentials in repr, exceptions, observations or fixtures.
+- accept literal secrets in contracts;
+- include credential-provider repr, headers or token material in observations/errors/fixtures.
 
-The credential exists only inside the reader boundary long enough to construct the Authorization header.
+The returned Authorization value exists only inside the reader long enough to perform the request.
 
-The initial trust policy is authenticated verification. Anonymous public reads may be added later but cannot produce the same authenticated trust basis in v0.8.
+### Authentication semantics
 
-The reader first validates that the supplied credential is accepted by an authentication-capable GitHub API request, then performs the target read. A resource read that is public by itself is not sufficient evidence that authentication succeeded.
+v0.8 requires authenticated verification. Anonymous reads cannot produce the authenticated trust basis.
 
-GitHub currently documents that invalid credentials initially yield `401`, while insufficient access can produce `403` or a privacy-preserving `404`. Therefore `404` is never blindly interpreted as proof that a private resource does not exist.
+The reader always sends the supplied Authorization header with the target request. GitHub currently documents that invalid credentials initially return `401`; therefore a target response accepted under the supplied Authorization header can be treated as authenticated only when it is not an authentication failure and the response is otherwise structurally valid.
+
+No separate `/user` identity lookup is required in v0.8. This avoids coupling the verifier to one token family and avoids collecting account identity that is unnecessary for the proof.
+
+A public-resource `200` with an accepted Authorization header can support authenticated state verification. A `401` is `INDETERMINATE(authentication_failed)`.
+
+GitHub documents that insufficient private-resource access can deliberately appear as `404`; therefore every target `404` is treated as indeterminate in v0.8 rather than proof of non-existence.
 
 ### Least privilege
 
-The implementation requests only read operations needed for repository metadata and pull-request state. It must not require write permissions and must not expose mutation methods.
+Only read access needed for repository metadata and pull-request state is permitted. No write method or mutation endpoint exists in the reader interface.
 
-GitHub currently documents pull-request reads as available to read-capable GitHub App/user/installation tokens, and repository metadata is separately read-scoped. Exact required permissions are documented in the implementation guide and verified against GitHub's current API docs at release time.
+Exact permission requirements are documented against GitHub's current API docs before implementation merge. The implementation must not request or depend on write permission.
 
-### Transport rules
+### Transport choice
 
-The built-in reader:
+The built-in reader uses a small standard-library `http.client` HTTPS transport so v0.8 adds no mandatory third-party runtime dependency and avoids environment-driven proxy discovery.
 
-- uses HTTPS only;
-- targets GitHub.com API only in v0.8;
-- sends a fixed API-version header and fixed User-Agent;
-- performs GET only;
-- sets bounded connect/read timeouts;
-- does not automatically retry;
-- does not forward Authorization to a different host during redirects;
-- rejects cross-host redirects;
-- bounds response size before JSON parsing;
-- parses only required response fields and discards raw bodies afterward;
-- never interpolates provider URLs, raw response bodies or credential material into public errors.
+Transport rules:
 
-GitHub Enterprise support is out of scope for v0.8.
+- GitHub.com API only (`api.github.com`) in v0.8;
+- HTTPS only;
+- fixed GitHub API-version header;
+- fixed User-Agent;
+- GET only;
+- bounded connect/read timeout;
+- no automatic retry;
+- no conditional-cache/ETag reuse between verifier calls;
+- all HTTP redirects rejected rather than followed;
+- Authorization is never forwarded to another host;
+- bounded response size before JSON parsing;
+- only required fields normalized;
+- raw response body discarded after normalization;
+- provider URL, response body and exception text never enter public evidence.
+
+Rejecting redirects means a renamed/transferred repository locator may become `INDETERMINATE`; the caller must supply the current locator. Numeric repository ID still protects target identity after a successful read.
+
+GitHub Enterprise Server is out of scope for v0.8.
 
 ## Private snapshot
 
-`GitHubPullRequestSnapshot` may contain, in memory:
+`GitHubPullRequestSnapshot` may contain in memory:
 
-- repository ID;
+- target repository ID;
 - PR number;
-- state/merged state;
-- head SHA;
+- state and merged boolean;
+- head object ID;
 - head repository ID;
 - base ref;
-- merge SHA;
-- provider observation timestamp;
-- internal HTTP status/category needed for error classification.
+- merge object ID;
+- request start/end timestamps;
+- provider `Date` header when present;
+- private HTTP status/category needed for classification.
 
-It has a fixed/static repr and no default public serializer.
-
-The raw GitHub payload is not retained after normalization.
+It has a fixed/static repr and no default public serializer. The raw GitHub payload is not retained after normalization.
 
 ## Remote observation model
 
-Remote verification requires three outcomes rather than a single success boolean:
+Remote verification requires three outcomes:
 
-- `MATCH` — trusted provider observation decisively matches the contract;
-- `MISMATCH` — trusted provider observation decisively contradicts the contract;
-- `INDETERMINATE` — the verifier could not safely decide.
+- `MATCH` — a trusted provider observation decisively matches the contract;
+- `MISMATCH` — a trusted provider observation decisively contradicts the contract;
+- `INDETERMINATE` — the verifier cannot safely decide.
 
-Examples of `INDETERMINATE`:
+`INDETERMINATE` includes:
 
-- authentication could not be validated;
-- private-resource `404` is ambiguous;
-- permission is insufficient;
-- rate limit is reached;
+- invalid/unaccepted authentication;
+- `404` ambiguity;
+- insufficient permission;
+- rate limiting;
 - network/TLS/timeout failure;
-- provider returns malformed/unexpected data;
-- the observation cannot meet freshness/trust requirements.
+- rejected redirect;
+- malformed/oversized/unexpected provider data;
+- observation that cannot meet the trust/freshness rules.
 
-This distinction is mandatory. Provider unavailability must never be converted into a false claim that the target action failed.
+Provider unavailability is never converted into a claim that the target action failed.
 
 ## Existing evaluator mapping
 
 The existing evaluator remains authoritative.
 
-`remote_postcondition_case()` maps outcomes as follows:
+`remote_postcondition_case()` maps:
 
 - trusted `MATCH` -> one successful verification event -> `VERIFIED_COMPLETE` when it is the sole requirement;
 - trusted `MISMATCH` -> one failed verification event -> `FAILED`;
-- `INDETERMINATE` or untrusted observation -> no successful/failed action event -> `UNVERIFIED`.
+- `INDETERMINATE` or untrusted observation -> no verification event -> `UNVERIFIED`.
 
-This is intentionally different from treating every non-match as failure. `UNVERIFIED` means reality could not be established; `FAILED` means reality was observed and contradicted the claim.
+This distinction is deliberate:
 
-No second completion-status engine is introduced.
+- `FAILED` means independent reality was successfully observed and contradicted the required state;
+- `UNVERIFIED` means independent reality could not safely be established.
+
+The existing evaluator itself is not changed to create a remote-specific status engine.
+
+## Provider error classification
+
+Fail closed with fixed classifications:
+
+- `401` -> `INDETERMINATE(authentication_failed)`;
+- `404` -> `INDETERMINATE(resource_unobservable)`;
+- `403` or `429` with rate-limit evidence (`Retry-After` or exhausted rate-limit header) -> `INDETERMINATE(rate_limited)`;
+- other `403` -> `INDETERMINATE(permission_unverified)`;
+- `3xx` -> `INDETERMINATE(redirect_rejected)`;
+- `5xx`, timeout, DNS/TLS/network failure -> `INDETERMINATE(provider_unavailable)`;
+- malformed/oversized/unexpected successful response -> `INDETERMINATE(invalid_provider_response)`;
+- authenticated, structurally valid snapshot contradicting contract -> `MISMATCH`;
+- authenticated exact snapshot match -> `MATCH`.
+
+No raw provider error string is serialized.
 
 ## Privacy boundary
 
@@ -199,36 +232,39 @@ Privacy remains a hard acceptance requirement.
 ### Never emitted by default public serialization
 
 - access tokens, authorization headers, cookies or credential metadata;
-- usernames or authenticated account identity;
+- username/authenticated account identity;
 - repository owner/name;
 - repository numeric IDs;
 - PR numbers;
 - branch/ref names;
-- head or merge SHAs;
+- head or merge object IDs;
 - provider request URLs;
 - raw response JSON/body;
-- provider error text;
+- HTTP exception/provider error text;
 - caller contract IDs;
-- machine paths, environment values or local secret locations;
+- machine paths or environment values;
 - content-derived or contract-derived digests.
 
 ### Public evidence may contain only
 
 - fixed provider/kind/schema labels;
-- fixed trust-basis labels;
-- fixed outcome/reason codes;
+- fixed trust-basis label;
+- fixed outcome/reason code;
 - booleans for declared checks;
-- bounded numeric counts/age values only where they cannot identify caller content.
+- a coarse fixed freshness flag when useful.
 
-Private identifiers may be correlated by the caller outside the public evidence object.
+No raw timestamp, rate-limit count or private identifier is included in default public evidence.
 
-### Reason codes
+Private correlation identifiers remain caller-side.
 
-Reason codes are fixed and non-interpolating. Initial examples:
+### Fixed reason codes
+
+Initial codes:
 
 - `matched`;
 - `repository_identity_mismatch`;
 - `head_mismatch`;
+- `head_repository_mismatch`;
 - `base_mismatch`;
 - `state_mismatch`;
 - `merge_mismatch`;
@@ -236,55 +272,37 @@ Reason codes are fixed and non-interpolating. Initial examples:
 - `permission_unverified`;
 - `resource_unobservable`;
 - `rate_limited`;
+- `redirect_rejected`;
 - `provider_unavailable`;
 - `invalid_provider_response`;
 - `observation_not_fresh`.
 
-Public output never includes raw HTTP exception strings or response bodies.
+Codes never interpolate caller/provider values.
 
 ## Freshness and consistency
 
-v0.8 verifies state at observation time, not indefinitely.
+Each `verify_*` call performs a new provider request. v0.8 does not reuse a caller-supplied source-agent cache, local ETag cache or previous verifier snapshot.
 
-Each private observation records request start/end time and the provider response date when available. The reader requests fresh state rather than accepting an application-level cached result supplied by the source agent.
+The private snapshot records request start/end time and provider `Date` when available. The implementation defines a bounded clock-skew tolerance; an obviously stale/inconsistent provider timestamp yields `INDETERMINATE(observation_not_fresh)` rather than a match.
 
-A public observation may report only a coarse/fixed freshness status, not the private timestamp unless an explicit disclosure layer is added later.
+The default public observation exposes only a boolean/fixed freshness result.
 
-The verifier makes no claim that a matching state persists after observation. Temporal re-verification, revocation and rollback monitoring remain follow-on work.
+A match proves state only at observation time. No background monitoring, polling, revocation watch or persistence claim is added in v0.8.
 
-No background monitoring or automatic polling is added in v0.8.
+## Security/trust boundary
 
-## Security and trust boundaries
+A `MATCH` proves only that the trusted HTTPS/authenticated GitHub read reported the required state at observation time.
 
-The verifier proves provider-observed state, not causality.
-
-A `MATCH` does not prove:
+It does not prove:
 
 - the agent caused the state;
 - the user authorized the action;
-- the action was safe or desirable;
-- the expected state was not created by another actor;
-- the state remains true after the observation;
+- the action was desirable/safe;
+- another actor did not create the same state;
+- the state persists later;
 - GitHub itself was uncompromised.
 
-The HTTPS/provider/authentication boundary is explicitly trusted for v0.8.
-
-## Failure handling
-
-Fail closed:
-
-- invalid contract -> reject construction;
-- unsupported provider/kind -> reject;
-- invalid credential -> `INDETERMINATE`;
-- permission ambiguity -> `INDETERMINATE`;
-- private/ambiguous `404` -> `INDETERMINATE` unless an earlier trusted read makes non-existence decisive;
-- `403`/`429` rate limit -> `INDETERMINATE` with fixed rate-limit reason;
-- network/TLS/timeout -> `INDETERMINATE`;
-- malformed provider JSON/schema -> `INDETERMINATE`;
-- authenticated, structurally valid response that contradicts contract -> `MISMATCH`;
-- exact trusted match -> `MATCH`.
-
-No retries are hidden inside verification. A caller can choose to run a new explicit verification later.
+The HTTPS/GitHub/authentication boundary is explicitly trusted for v0.8.
 
 ## Public API target
 
@@ -301,56 +319,56 @@ observation = verify_github_pull_request(contract, reader)
 evaluation = evaluate_github_pull_request(contract, reader)
 ```
 
-The credential provider is caller-owned and deliberately omitted from examples containing literal secrets.
+No example contains a literal credential.
 
 ## Testing strategy
 
-TDD is mandatory. Tests use synthetic fixtures and fake transports; no real token is committed or required by normal CI.
+TDD is mandatory. Normal CI uses only synthetic fixtures and fake transports; no real GitHub token is committed or required.
 
-Minimum RED-first coverage:
-
-### Contracts/privacy
+### Contract/privacy tests
 
 - strict field validation;
+- 40/64 hex object-ID validation/canonicalization;
 - contradictory merge fields rejected;
-- fixed repr excludes every caller-controlled sentinel;
-- public observation serialization excludes repository/PR/ref/SHA/token sentinels;
-- deep immutability where nested state exists.
+- fixed contract/private-snapshot repr;
+- public serialization excludes repository/PR/ref/object-ID/token sentinels;
+- no caller-controlled values in fixed errors.
 
-### Reader/authentication
+### Reader/authentication tests
 
-- credential provider is called only inside reader boundary;
+- credential provider invoked only in reader boundary;
 - no environment-variable reads;
-- no write HTTP methods;
-- invalid credential -> indeterminate;
-- insufficient permission -> indeterminate;
-- ambiguous private `404` -> indeterminate;
+- no write HTTP method;
+- no redirects followed;
+- invalid auth -> indeterminate;
+- `404` -> indeterminate;
+- permission `403` -> indeterminate;
 - rate-limit `403`/`429` -> indeterminate;
-- timeout/TLS/network failure -> indeterminate;
+- timeout/DNS/TLS/network/5xx -> indeterminate;
 - malformed/oversized response -> indeterminate;
-- cross-host redirect rejected without forwarding authorization;
-- raw provider errors never enter public output;
-- no automatic retry.
+- raw errors/headers/body never enter public output;
+- no automatic retry;
+- no cross-call ETag/cache reuse.
 
-### Verification semantics
+### Verification tests
 
 - exact match;
-- wrong repository identity;
-- wrong head SHA;
-- wrong head repository identity;
-- wrong base ref;
-- open vs closed vs merged distinctions;
-- merged PR with wrong expected merge SHA;
-- provider indeterminate state;
-- GitHub pre-merge `merge_commit_sha` is never accepted as post-merge completion evidence.
+- repository identity mismatch;
+- head mismatch;
+- head-repository mismatch;
+- base mismatch;
+- open/closed/merged distinctions;
+- merged PR with wrong merge object ID;
+- pre-merge `merge_commit_sha` never accepted as post-merge completion evidence;
+- stale/inconsistent timestamp -> indeterminate.
 
-### Evaluator integration
+### Evaluator tests
 
 - match -> `VERIFIED_COMPLETE`;
-- decisive mismatch -> `FAILED`;
-- unavailable/ambiguous read -> `UNVERIFIED`;
-- existing evaluator remains the only status engine;
-- all v0.7 local postcondition tests remain unchanged and green.
+- trusted mismatch -> `FAILED`;
+- provider ambiguity/unavailability -> `UNVERIFIED`;
+- no new status engine;
+- v0.7 local tests unchanged and green.
 
 ### Release gates
 
@@ -359,60 +377,60 @@ Minimum RED-first coverage:
 - dependency check;
 - existing live-runner safety gate;
 - repeated verification gate;
-- static privacy regression for remote package;
-- no committed credentials or provider response fixtures containing real account data.
+- remote privacy regression scan;
+- no committed credentials or real account/provider fixtures.
 
-A separately gated real-provider experiment may be run only against a disposable/research repository after the implementation is reviewed. It is not part of normal CI and must not publish private identifiers.
+A real-provider integration experiment is separately gated and never part of ordinary CI.
 
 ## First empirical experiment after implementation
 
-Once v0.8 is independently reviewed and exact-head CI is green:
+After independent implementation review and exact-head gates:
 
 1. use a disposable/research repository;
-2. run a bounded GitHub task with an agent scaffold;
-3. capture the agent's normal completion claim/trace separately;
-4. independently verify GitHub PR state through v0.8;
+2. run a bounded GitHub task with one agent scaffold;
+3. capture the agent's normal claim/trace separately;
+4. independently verify the external PR state through v0.8;
 5. inject false-success, wrong-head, wrong-base, wrong-state, permission-failure and rollback conditions;
-6. compare source claim with provider-observed state;
-7. measure false-completion rate, recovery, unnecessary retry/refusal, verifier disagreement and verification overhead;
-8. repeat with at least two independently implemented agent scaffolds before comparative claims.
+6. compare source claim against independent provider observation;
+7. measure false completion, recovery, unnecessary retry/refusal, disagreement and verification overhead;
+8. repeat with at least two independently implemented agent scaffolds before comparative reliability claims.
 
 No real-world performance or commercial reliability claim is made until these runs exist.
 
 ## Gaming / Lucas-Critique checks
 
-The new verifier changes agent incentives, so the experiment must explicitly test adaptation:
+The verifier changes incentives, so the experiment explicitly checks:
 
-- **intended adaptation:** agent waits for externally verifiable completion before claiming done;
-- **gaming adaptation:** agent creates the literal expected state temporarily or satisfies only the narrow contract;
-- **strategic adaptation:** agent avoids difficult tasks or over-retries to obtain a verifier pass;
-- **equilibrium effect:** workflows may shift toward actions that are easiest to verify rather than best for the user;
-- **failure signal:** rising refusal/retry rates, post-verification rollback, contract-satisfying but intent-violating actions, or disagreement between user outcome and verifier outcome.
+- **intended adaptation:** agents wait for externally verifiable completion before saying done;
+- **gaming adaptation:** agents temporarily create the literal expected state or satisfy only the narrow contract;
+- **strategic adaptation:** agents avoid hard tasks or over-retry to obtain a verifier pass;
+- **equilibrium effect:** workflows may drift toward what is easiest to verify rather than what is best for the user;
+- **failure signal:** rising refusal/retry rates, post-verification rollback, contract-satisfying but intent-violating actions, or user/verifier disagreement.
 
-These signals determine whether later versions need temporal checks, richer intent contracts or causal evidence.
+These signals determine whether later versions need temporal verification, richer intent contracts or causal evidence.
 
 ## Compatibility
 
-- v0.7 local public APIs/CLIs unchanged;
-- existing sandbox/live behavior unchanged;
-- existing evaluator remains authoritative;
+- v0.7 local APIs/CLIs unchanged;
+- sandbox/live behavior unchanged;
+- existing evaluator authoritative;
 - Python 3.10-3.13 supported;
-- no mandatory third-party runtime dependency is introduced if the built-in reader can remain on a small auditable standard-library HTTPS transport;
-- no provider mutation or spend capability is introduced.
+- no mandatory third-party runtime dependency;
+- no provider mutation or spend capability.
 
 ## Out of scope for v0.8
 
-- creating, merging, closing or commenting on PRs;
+- PR creation/merge/close/comment;
 - branch/ref mutation;
-- GitHub issue/action/deployment verification;
+- GitHub issues/actions/deployments verification;
 - GitHub Enterprise Server;
-- Gmail, Calendar, databases, payments, CRM or browser verification;
+- Gmail/Calendar/database/payment/CRM/browser verification;
 - automatic retries/polling/background monitoring;
 - causal attribution;
 - user-intent verification;
-- token acquisition/OAuth login flows;
+- OAuth/token acquisition;
 - secret storage;
-- generic plugin discovery;
+- dynamic plugin discovery;
 - public disclosure of raw provider identifiers;
 - production-readiness claims.
 
@@ -421,7 +439,7 @@ These signals determine whether later versions need temporal checks, richer inte
 v0.8 is complete only if:
 
 1. one authenticated read-only GitHub PR contract can be independently verified;
-2. target repository identity, head SHA, base ref and PR state are checked explicitly;
+2. target repository ID, head object ID, base ref and PR state are checked explicitly;
 3. provider ambiguity maps to `UNVERIFIED`, not false `FAILED` evidence;
 4. decisive trusted mismatch maps to `FAILED`;
 5. trusted exact match maps through the existing evaluator to `VERIFIED_COMPLETE`;
@@ -430,18 +448,18 @@ v0.8 is complete only if:
 8. authentication/network/response parsing fail closed;
 9. all v0.7 behavior remains unchanged;
 10. exact-head repository gates pass before merge;
-11. documentation states clearly what external-state verification proves and does not prove;
-12. the first real-provider experiment remains separate from implementation claims.
+11. documentation states exactly what remote verification proves and does not prove;
+12. real-provider experiments remain separate from implementation claims.
 
 ## External API assumptions to re-check before implementation merge
 
-GitHub's documentation as checked 29 August 2026 states that:
+GitHub documentation checked 29 August 2026 currently states that:
 
 - invalid REST credentials initially return `401`;
 - insufficient access can return `403` or privacy-preserving `404`;
-- private resources may intentionally return `404` when authentication is inadequate;
+- private resources may intentionally return `404` when auth/access is inadequate;
 - rate limits can return `403` or `429`;
 - pull-request GET is available to read-capable token types;
 - `merge_commit_sha` changes meaning after merge and depends on merge method.
 
-These are provider semantics, not permanent truths. The implementation must pin/document the API version it uses and re-check these assumptions against current GitHub documentation before release.
+These provider semantics are not permanent truths. The implementation must pin/document the GitHub API version it uses and re-check them immediately before release.
