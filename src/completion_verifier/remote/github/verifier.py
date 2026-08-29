@@ -118,6 +118,7 @@ def verify_github_pull_request(
 
     evidence = {
         "repository_identity_matches": snapshot.repository_id == contract.repository_id,
+        "pull_request_matches": snapshot.pull_number == contract.pull_number,
         "head_matches": snapshot.head_oid == contract.expected_head_oid,
         "head_repository_matches": (
             True
@@ -136,6 +137,7 @@ def verify_github_pull_request(
 
     ordered_mismatches = (
         ("repository_identity_matches", "repository_identity_mismatch"),
+        ("pull_request_matches", "pull_request_mismatch"),
         ("state_matches", "state_mismatch"),
         ("head_matches", "head_mismatch"),
         ("head_repository_matches", "head_repository_mismatch"),
