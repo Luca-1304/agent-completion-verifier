@@ -24,7 +24,8 @@
 - Trusted structural contradiction is `MISMATCH`; exact trusted state is `MATCH`.
 - `MATCH` -> `VERIFIED_COMPLETE`, `MISMATCH` -> `FAILED`, `INDETERMINATE` -> `UNVERIFIED` through the existing evaluator.
 - Object IDs accept exactly 40 or 64 ASCII hex characters and are canonicalized lowercase.
-- Target numeric repository ID is authoritative for identity; `owner/name` is private addressing data only.
+- Target numeric repository ID is authoritative for identity; `owner/name` is private addressing data only. On GitHub's pull-request response this identity comes from `base.repo.id`, never the top-level pull-request `id`.
+- Freshness constants are explicit: local observation age <= 60 seconds; provider `Date`, when present, may differ from the local request-finish time by at most 300 seconds; request start must be <= request finish and finish must not be in the future beyond 5 seconds of clock tolerance.
 - Normal CI never requires a real GitHub token or performs a real provider call.
 - Real-provider experiments remain separately gated after implementation review.
 - TDD is mandatory: commit test-only RED first, confirm the expected CI failure, then add minimal production code.
@@ -93,7 +94,7 @@ remote_postcondition_case(observation: RemoteObservation, *, completion_claimed:
 evaluate_remote_observation(observation: RemoteObservation, *, completion_claimed: bool = True) -> Evaluation
 ```
 
-- [ ] **Step 1: Write contract/privacy/evaluator tests first.** Cover positive IDs, `owner/name` syntax, bounded ref strings, control-character rejection, 40/64 object-ID validation/canonicalization, expected-state enum, merge OID only for `merged`, fixed repr for contract/snapshot, observation allow-lists, and evaluator mapping.
+- [ ] **Step 1: Write contract/privacy/evaluator tests first.** Cover positive IDs (explicitly reject `bool` despite `bool` being an `int` subclass), `owner/name` syntax, bounded ref strings, control-character rejection, 40/64 object-ID validation/canonicalization, expected-state enum, merge OID only for `merged`, fixed repr for contract/snapshot, observation allow-lists, and evaluator mapping.
 
 ```python
 def test_indeterminate_remote_observation_maps_to_unverified(self) -> None:
@@ -155,7 +156,7 @@ evaluate_github_pull_request(
 `GitHubReadResult(snapshot=None, reason=<fixed indeterminate code>)` is the only reader failure surface. Raw exceptions never cross the reader boundary.
 
 - [ ] **Step 1: Add RED tests with a small fake reader.** Cover exact match, target repository ID mismatch, head OID mismatch, optional head-repository mismatch, base mismatch, open/closed/merged distinctions, wrong merge OID, and an indeterminate reader result.
-- [ ] **Step 2: Add freshness RED tests.** Provider timestamp far outside bounded skew yields `INDETERMINATE(observation_not_fresh)`; normal missing provider `Date` does not by itself fail if local request start/end are coherent and recent. Inject `now` for deterministic testing.
+- [ ] **Step 2: Add freshness RED tests.** Enforce the exact global constants: request order valid; finish no more than 5 seconds in the future; local observation age <= 60 seconds; provider `Date`, when present, within 300 seconds of request finish. Violations yield `INDETERMINATE(observation_not_fresh)`. Missing provider `Date` is allowed when local timing is valid. Inject `now` for deterministic testing.
 - [ ] **Step 3: Commit RED and confirm CI fails because verifier functions are missing.**
 - [ ] **Step 4: Implement pure comparison verifier.** Check repository identity first, then state/head/head-repository/base/merge. Produce fixed evidence booleans such as `repository_identity_matches`, `head_matches`, `head_repository_matches`, `base_matches`, `state_matches`, `merge_matches`, `fresh`. Do not serialize expected/observed values.
 - [ ] **Step 5: Run task tests + full suite; commit GREEN:** `feat: verify GitHub pull request snapshots`.
@@ -195,9 +196,9 @@ class GitHubRESTReader:
 The injectable `connection_factory` is test-only dependency injection for deterministic fake `HTTPSConnection` behavior; normal CI performs no real network.
 
 - [ ] **Step 1: Write RED tests for request construction.** Assert host is exactly `api.github.com`; method exactly `GET`; path uses the private contract locator and PR number; headers include fixed `Accept`, `X-GitHub-Api-Version`, `User-Agent`, caller Authorization; no body; one request only.
-- [ ] **Step 2: Write RED tests for credential safety.** Empty/invalid header -> `authentication_failed`; provider called only inside reader; provider repr/token sentinel absent from returned result repr/public observation; no environment lookup tokens appear in remote source.
+- [ ] **Step 2: Write RED tests for credential safety.** Empty/non-string/control-character Authorization header -> `authentication_failed`; provider called only inside reader; provider repr/token sentinel absent from returned result repr/public observation; no environment lookup tokens appear in remote source.
 - [ ] **Step 3: Write RED classification tests.** `401`, every `404`, permission `403`, rate-limited `403`/`429`, any `3xx`, `5xx`, timeout/DNS/TLS/OSError, malformed JSON, wrong schema/types, truncated/oversized body.
-- [ ] **Step 4: Write RED success-normalization tests.** Normalize only `id`, PR `number`, `state`, `merged`, `head.sha`, `head.repo.id`, `base.ref`, `merge_commit_sha`, and response `Date`. Reject booleans masquerading as integer IDs and malformed object IDs.
+- [ ] **Step 4: Write RED success-normalization tests.** Normalize only target `base.repo.id`, PR `number`, `state`, `merged`, `head.sha`, nullable `head.repo.id`, `base.ref`, `merge_commit_sha`, and response `Date`. Explicitly prove the top-level PR `id` is ignored for repository identity. Reject booleans masquerading as integer IDs and malformed object IDs. A deleted-fork/null `head.repo` is normalized to `None`, not an exception.
 - [ ] **Step 5: Commit test-only RED and confirm expected failures.**
 - [ ] **Step 6: Implement `http.client.HTTPSConnection` transport.** Read at most `max_response_bytes + 1`; reject overflow. Do not follow redirects. Do not retry. Do not persist body. Do not expose provider exceptions. Use fixed reason codes only.
 - [ ] **Step 7: Run reader tests and full suite; commit GREEN:** `feat: add authenticated read-only GitHub reader`.
@@ -223,7 +224,7 @@ The injectable `connection_factory` is test-only dependency injection for determ
 **Root public imports:** contracts/outcomes/evaluation helpers may be exported from `completion_verifier`; credential/transport classes remain clearly provider-specific under `completion_verifier.remote.github`.
 
 - [ ] **Step 1: Add RED release/privacy tests.** Assert version `0.8.0`; docs state authenticated external-state proof boundary; a representative fake-reader match/mismatch/indeterminate public payload excludes synthetic repo locator, IDs, PR number, refs, OIDs, token sentinel, provider body/error sentinel, timestamps, and credential-provider repr.
-- [ ] **Step 2: Add static capability tests.** Remote source must not contain `os.environ`, `os.getenv`, `.env`, mutation method literals (`POST`, `PUT`, `PATCH`, `DELETE`) as request methods, retry loops/backoff/polling, or third-party HTTP client imports. `pyproject.toml` base dependencies stay empty.
+- [ ] **Step 2: Add static capability tests.** Remote source must not contain `os.environ`, `os.getenv`, `.env`, mutation request methods, retry/backoff/polling logic, or third-party HTTP client imports. `pyproject.toml` base dependencies stay empty. The test should inspect AST/request-call literals rather than flagging explanatory docstrings containing words such as `POST` or `retry`.
 - [ ] **Step 3: Commit RED and confirm expected version/docs/release failures.**
 - [ ] **Step 4: Update public API/version/docs and implement `verify_remote_release.py`.** The release script uses only fake readers/transports and proves match/mismatch/indeterminate mapping plus privacy. Add it to `scripts/verify_release.py`.
 - [ ] **Step 5: Keep README claims exact.** Say v0.8 can independently verify one authenticated GitHub PR state at observation time; explicitly state it does not prove causality, user authorization, permanence, provider integrity, or production safety.
@@ -237,7 +238,7 @@ The injectable `connection_factory` is test-only dependency injection for determ
 - Modify only the existing comment in `.github/workflows/fifteen-pass-verification.yml` if necessary to trigger the already-existing PR-path stress workflow. Do not alter commands, permissions, matrices, cadence, checkout auth, or environment behavior.
 
 - [ ] **Step 1: Confirm ordinary PR CI on exact implementation head is green for Python 3.10, 3.11, 3.12, and 3.13.** Each job must run unit tests, `scripts/verify_release.py`, build the wheel, install in a clean environment, and `pip check`.
-- [ ] **Step 2: Confirm live-runner safety/wheel workflow remains green.** If its path filter does not naturally run because v0.8 does not touch live files/`pyproject.toml`, the version bump in `pyproject.toml` should trigger it; do not weaken the workflow.
+- [ ] **Step 2: Confirm live-runner safety/wheel workflow remains green.** The v0.8 `pyproject.toml` version bump triggers its existing path filter; do not weaken the workflow.
 - [ ] **Step 3: Trigger existing 15-pass workflow without changing its commands.** Confirm both Python 3.10 and 3.13 jobs complete the `Run fifteen consecutive complete cycles` step successfully.
 - [ ] **Step 4: Compare implementation branch to `main`.** Must be 0 behind immediately before merge; no unplanned mutations/dependencies/secrets.
 
@@ -252,9 +253,10 @@ The injectable `connection_factory` is test-only dependency injection for determ
   - public repo + invalid token cannot become trusted;
   - private/inaccessible repo `404` cannot become decisive failure;
   - renamed locator redirect cannot be followed;
-  - same PR number in wrong repository cannot pass numeric identity check;
+  - same PR number in wrong repository cannot pass numeric `base.repo.id` identity check;
+  - top-level PR `id` cannot be mistaken for repository identity;
   - open PR exposing `merge_commit_sha` cannot satisfy merged state;
-  - malformed `head.repo`/deleted fork cannot crash or leak;
+  - malformed/null `head.repo` cannot crash or leak;
   - `True` cannot pass as repository/PR numeric ID;
   - uppercase valid OIDs canonicalize; invalid-length/non-hex reject;
   - provider `Date` parsing cannot throw raw text into evidence;
@@ -263,7 +265,7 @@ The injectable `connection_factory` is test-only dependency injection for determ
   - indeterminate state produces an event-free case and `UNVERIFIED`.
 - [ ] **Step 3: If a review finding exists, add a failing regression test first, confirm RED, then make the smallest fix and re-run all exact-head gates.**
 - [ ] **Step 4: Re-review the final diff.** No unresolved review threads, no privacy regressions, no new untested behavior.
-- [ ] **Step 5: Only then mark implementation PR ready and squash-merge using the exact verified head SHA. Preserve implementation and design branches.
+- [ ] **Step 5: Only then mark implementation PR ready and squash-merge using the exact verified head SHA. Preserve implementation and design branches.**
 
 ---
 
