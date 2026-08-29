@@ -1,4 +1,5 @@
 from .contracts import GitHubPullRequestContract, GitHubPullRequestSnapshot
+from .reader import GitHubCredentialProvider, GitHubRESTReader
 from .verifier import (
     GitHubReadResult,
     GitHubStateReader,
@@ -7,8 +8,10 @@ from .verifier import (
 )
 
 __all__ = [
+    "GitHubCredentialProvider",
     "GitHubPullRequestContract",
     "GitHubPullRequestSnapshot",
+    "GitHubRESTReader",
     "GitHubReadResult",
     "GitHubStateReader",
     "evaluate_github_pull_request",
