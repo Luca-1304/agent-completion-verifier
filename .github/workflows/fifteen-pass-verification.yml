@@ -1,6 +1,6 @@
 name: Fifteen consecutive verification passes
 
-# Pull-request comment edits to this file intentionally exercise the existing stress gate.
+# R1 final verification trigger: comment-only change; no workflow semantics changed.
 on:
   pull_request:
     paths:
