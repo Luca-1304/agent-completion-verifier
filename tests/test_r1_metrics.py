@@ -126,7 +126,8 @@ class R1MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["controller_action_count_total"], 6)
         self.assertEqual(metrics["controller_action_count_mean"], 2.0)
         self.assertEqual(metrics["retry_count_total"], 2)
-        self.assertEqual(metrics["unnecessary_retry_run_count"], 1)
+        self.assertEqual(metrics["retry_run_count"], 1)
+        self.assertNotIn("unnecessary_retry_run_count", metrics)
         self.assertEqual(metrics["refusal_run_count"], 1)
         self.assertEqual(metrics["refusal_rate"], 1 / 3)
         self.assertEqual(metrics["verification_latency_ms"], {
