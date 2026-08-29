@@ -58,7 +58,6 @@ def _build_report(
     runs: tuple[R1RunRecord, ...],
     metrics: dict[str, object],
 ) -> str:
-    del metrics
     scenarios = ", ".join(config.scenarios)
     return (
         "# R1 controlled real-provider experiment\n\n"
@@ -70,6 +69,7 @@ def _build_report(
         f"- Scenarios: {scenarios}\n"
         f"- Treatment: {config.treatment}\n"
         f"- Scaffold: {config.scaffold_id} {config.scaffold_version}\n"
+        f"- Cleanup failures: {metrics['cleanup_failure_count']}\n"
         "\nA verifier MATCH means the reviewed remote contract matched the authenticated "
         "observation at that observation point. It does not prove causality, user "
         "authorization, permanence, provider integrity, or production safety.\n"
