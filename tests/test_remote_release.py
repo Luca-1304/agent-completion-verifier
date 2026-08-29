@@ -19,6 +19,8 @@ from completion_verifier.remote.github import (
 ROOT = Path(__file__).resolve().parents[1]
 REMOTE_ROOT = ROOT / "src" / "completion_verifier" / "remote"
 DOC_PATH = ROOT / "docs" / "REMOTE_GITHUB.md"
+README_PATH = ROOT / "README.md"
+ROADMAP_PATH = ROOT / "docs" / "RESEARCH_ROADMAP.md"
 PYPROJECT = ROOT / "pyproject.toml"
 
 PRIVATE_REPOSITORY = "PRIVATE_OWNER_SENTINEL/PRIVATE_REPO_SENTINEL"
@@ -95,6 +97,14 @@ class RemoteReleaseBoundaryTests(unittest.TestCase):
         for phrase in required_phrases:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
+
+    def test_release_docs_reflect_remote_verifier_as_implemented(self) -> None:
+        readme = README_PATH.read_text(encoding="utf-8")
+        roadmap = ROADMAP_PATH.read_text(encoding="utf-8")
+        self.assertIn("Authenticated GitHub remote-state verification", readme)
+        self.assertNotIn("It does not prove remote state", readme)
+        self.assertIn("authenticated GitHub pull-request remote-state verifier", roadmap)
+        self.assertNotIn("Design one separately reviewed remote-state verifier", roadmap)
 
     def test_public_remote_results_exclude_all_private_sentinels(self) -> None:
         expected = contract()
