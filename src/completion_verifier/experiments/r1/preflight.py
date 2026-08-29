@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +28,8 @@ _PREFLIGHT_REASONS = frozenset(
     }
 )
 _PERMIT_KEY = object()
+_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
 
 def _require_bool(value: object, name: str) -> bool:
@@ -42,13 +45,23 @@ def _positive_repository_id(value: object, name: str) -> int:
 
 
 def _validate_locator(value: object) -> str:
+    """Validate a deliberately conservative ASCII GitHub owner/repository locator.
+
+    R1 does not need to support every name the provider might accept. Restricting
+    the live experiment to an unambiguous URL-safe subset removes dot-segment,
+    percent-encoding, query/fragment, whitespace and Unicode-confusable ambiguity.
+    """
     if not isinstance(value, str) or not value or value != value.strip():
         raise ValueError("Repository locator must be a non-empty exact string.")
     if value.count("/") != 1 or "\\" in value or "\x00" in value:
         raise ValueError("Repository locator must use owner/repository form.")
     owner, repo = value.split("/", 1)
-    if not owner or not repo or any(ord(char) < 32 or ord(char) == 127 for char in value):
-        raise ValueError("Repository locator must use owner/repository form.")
+    if (
+        not _OWNER_RE.fullmatch(owner)
+        or not _REPOSITORY_RE.fullmatch(repo)
+        or repo in {".", ".."}
+    ):
+        raise ValueError("Repository locator must use conservative ASCII owner/repository form.")
     return value
 
 
