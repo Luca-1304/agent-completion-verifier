@@ -1,6 +1,6 @@
 name: Fifteen consecutive verification passes
 
-# Pull-request edits to this file intentionally exercise the existing stress gate.
+# Pull-request comment edits to this file intentionally exercise the existing stress gate.
 on:
   pull_request:
     paths:
