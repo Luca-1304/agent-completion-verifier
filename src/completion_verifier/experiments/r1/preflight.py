@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any
 
 from .models import R1_CONTROLLER_ACTIONS
@@ -47,12 +48,7 @@ def _positive_repository_id(value: object, name: str) -> int:
 
 
 def _validate_locator(value: object) -> str:
-    """Validate a deliberately conservative ASCII GitHub owner/repository locator.
-
-    R1 does not need to support every name the provider might accept. Restricting
-    the live experiment to an unambiguous URL-safe subset removes dot-segment,
-    percent-encoding, query/fragment, whitespace and Unicode-confusable ambiguity.
-    """
+    """Validate a deliberately conservative ASCII GitHub owner/repository locator."""
     if not isinstance(value, str) or not value or value != value.strip():
         raise ValueError("Repository locator must be a non-empty exact string.")
     if value.count("/") != 1 or "\\" in value or "\x00" in value:
@@ -129,17 +125,29 @@ class R1PreflightRequest:
         return "R1PreflightRequest()"
 
 
+class _PermitState:
+    __slots__ = ("lock", "consumed", "output_binding")
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.consumed = False
+        self.output_binding: str | None = None
+
+
 @dataclass(frozen=True, init=False, repr=False)
 class R1LivePermit:
     _scenario_id: str
+    _repository_locator: str
     _repository_id: int
     _capabilities: tuple[str, ...]
     _max_live_actions: int
+    _state: _PermitState
 
     def __init__(
         self,
         *,
         scenario_id: str,
+        repository_locator: str,
         repository_id: int,
         capabilities: tuple[str, ...],
         max_live_actions: int,
@@ -148,9 +156,11 @@ class R1LivePermit:
         if _key is not _PERMIT_KEY:
             raise ValueError("R1 live permits are issued only by successful preflight.")
         object.__setattr__(self, "_scenario_id", scenario_id)
+        object.__setattr__(self, "_repository_locator", _validate_locator(repository_locator))
         object.__setattr__(self, "_repository_id", repository_id)
         object.__setattr__(self, "_capabilities", tuple(capabilities))
         object.__setattr__(self, "_max_live_actions", max_live_actions)
+        object.__setattr__(self, "_state", _PermitState())
 
     def __repr__(self) -> str:
         return "R1LivePermit()"
@@ -276,6 +286,7 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
 
     permit = R1LivePermit(
         scenario_id=request.scenario_id,
+        repository_locator=request.target.repository_locator,
         repository_id=request.target.repository_id,
         capabilities=trusted,
         max_live_actions=request.max_live_actions,
@@ -292,6 +303,7 @@ def validate_live_permit(
     capabilities: tuple[str, ...],
     actions_used: int,
     action_cost: int,
+    repository_locator: str | None = None,
 ) -> bool:
     if not isinstance(permit, R1LivePermit):
         return False
@@ -303,9 +315,51 @@ def validate_live_permit(
         return False
     if not isinstance(capabilities, tuple):
         return False
+    if repository_locator is not None:
+        try:
+            locator = _validate_locator(repository_locator)
+        except ValueError:
+            return False
+        if locator != permit._repository_locator:
+            return False
     return (
         scenario_id == permit._scenario_id
         and repository_id == permit._repository_id
         and capabilities == permit._capabilities
         and actions_used + action_cost <= permit._max_live_actions
     )
+
+
+def consume_live_permit(
+    permit: R1LivePermit,
+    *,
+    scenario_id: str,
+    repository_locator: str,
+    repository_id: int,
+    capabilities: tuple[str, ...],
+    output_binding: str,
+) -> bool:
+    """Atomically bind one issued permit to one live invocation.
+
+    Consumption happens only after the runner has validated and reserved the real
+    output destination. A consumed permit remains usable for authorization checks
+    inside that invocation but cannot start a second invocation.
+    """
+    if not isinstance(output_binding, str) or not output_binding:
+        return False
+    if not validate_live_permit(
+        permit,
+        scenario_id=scenario_id,
+        repository_locator=repository_locator,
+        repository_id=repository_id,
+        capabilities=capabilities,
+        actions_used=0,
+        action_cost=1,
+    ):
+        return False
+    with permit._state.lock:
+        if permit._state.consumed:
+            return False
+        permit._state.consumed = True
+        permit._state.output_binding = output_binding
+        return True
