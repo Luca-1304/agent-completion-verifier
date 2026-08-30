@@ -5,7 +5,7 @@ import http.client
 import json
 import math
 from typing import Callable, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .controller import (
     _validate_base_ref,
@@ -84,8 +84,11 @@ def _positive_int(value: object) -> int:
 class GitHubR1Controller:
     """Capability-minimal GitHub writer for the reviewed R1 experiment only.
 
-    Each public method performs at most one declared mutation request. It does
-    not retry, follow redirects, discover state, merge, reopen, or delete.
+    Each public mutation method performs at most one declared mutation request.
+    It does not retry, follow redirects, merge, reopen, or delete. A single
+    read-only reconciliation method exists only for cleanup after GitHub has
+    confirmed PR creation with HTTP 201 but the response cannot be safely
+    addressed. That reconciliation performs one bounded GET and never polls.
     """
 
     def __init__(
@@ -130,16 +133,23 @@ class GitHubR1Controller:
         return "GitHubR1Controller()"
 
     def is_bound_to(self, target: R1LiveTarget) -> bool:
-        """Return only whether this writer is bound to the supplied approved target."""
         return isinstance(target, R1LiveTarget) and self._target == target
 
-    def _failed(self, action: str, code: str) -> R1ControllerReceipt:
+    def _failed(self, action: str, code: str, *, private_target_ref: str | None = None) -> R1ControllerReceipt:
         return R1ControllerReceipt(
             action=action,
             success=False,
             action_cost=1,
             error_code=code,
+            private_target_ref=private_target_ref,
         )
+
+    def _authorization(self) -> str | None:
+        try:
+            authorization = self._credential_provider.authorization_header()
+        except Exception:
+            return None
+        return authorization if _valid_authorization_header(authorization) else None
 
     def _request(
         self,
@@ -149,12 +159,11 @@ class GitHubR1Controller:
         path: str,
         payload: dict[str, object],
         success_statuses: tuple[int, ...],
+        accepted_unaddressable_on_success: bool = False,
+        private_target_ref: str | None = None,
     ) -> tuple[dict[str, object] | None, R1ControllerReceipt | None]:
-        try:
-            authorization = self._credential_provider.authorization_header()
-        except Exception:
-            return None, self._failed(action, "authentication_failed")
-        if not _valid_authorization_header(authorization):
+        authorization = self._authorization()
+        if authorization is None:
             return None, self._failed(action, "authentication_failed")
 
         connection = None
@@ -182,14 +191,25 @@ class GitHubR1Controller:
                 return None, self._failed(action, "invalid_provider_response")
 
             raw_body = response.read(self._max_response_bytes + 1)  # type: ignore[attr-defined]
+            ambiguous_code = (
+                "accepted_unaddressable"
+                if accepted_unaddressable_on_success
+                else "invalid_provider_response"
+            )
             if len(raw_body) > self._max_response_bytes:
-                return None, self._failed(action, "invalid_provider_response")
+                return None, self._failed(
+                    action, ambiguous_code, private_target_ref=private_target_ref
+                )
             try:
                 raw = json.loads(raw_body.decode("utf-8"), object_pairs_hook=_strict_object)
             except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
-                return None, self._failed(action, "invalid_provider_response")
+                return None, self._failed(
+                    action, ambiguous_code, private_target_ref=private_target_ref
+                )
             if not isinstance(raw, dict):
-                return None, self._failed(action, "invalid_provider_response")
+                return None, self._failed(
+                    action, ambiguous_code, private_target_ref=private_target_ref
+                )
             return raw, None
         except (OSError, TimeoutError, http.client.HTTPException, TypeError, ValueError, OverflowError):
             return None, self._failed(action, "provider_unavailable")
@@ -200,9 +220,51 @@ class GitHubR1Controller:
                 except Exception:
                     pass
 
+    def _read_json_list(self, path: str) -> list[object] | None:
+        authorization = self._authorization()
+        if authorization is None:
+            return None
+        connection = None
+        try:
+            connection = self._connection_factory(
+                _GITHUB_HOST,
+                timeout=self._timeout_seconds,
+            )
+            headers = {
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": _API_VERSION,
+                "User-Agent": _USER_AGENT,
+                "Authorization": authorization,
+            }
+            connection.request("GET", path, body=None, headers=headers)  # type: ignore[attr-defined]
+            response = connection.getresponse()  # type: ignore[attr-defined]
+            status = response.status  # type: ignore[attr-defined]
+            if _status_error(response, status) is not None or status != 200:
+                return None
+            raw_body = response.read(self._max_response_bytes + 1)  # type: ignore[attr-defined]
+            if len(raw_body) > self._max_response_bytes:
+                return None
+            try:
+                raw = json.loads(raw_body.decode("utf-8"), object_pairs_hook=_strict_object)
+            except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                return None
+            return raw if isinstance(raw, list) else None
+        except (OSError, TimeoutError, http.client.HTTPException, TypeError, ValueError, OverflowError):
+            return None
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+
     @property
     def _repository_path(self) -> str:
         return quote(self._target.repository_locator, safe="/")
+
+    @property
+    def _owner(self) -> str:
+        return self._target.repository_locator.split("/", 1)[0]
 
     def create_branch(self, base_oid: str, branch_name: str) -> R1ControllerReceipt:
         oid = _validate_oid(base_oid)
@@ -299,6 +361,8 @@ class GitHubR1Controller:
                 "draft": True,
             },
             success_statuses=(201,),
+            accepted_unaddressable_on_success=True,
+            private_target_ref=branch,
         )
         if failure is not None:
             return failure
@@ -306,13 +370,49 @@ class GitHubR1Controller:
             assert raw is not None
             number = _positive_int(raw.get("number"))
         except (TypeError, ValueError):
-            return self._failed("create_pull_request", "invalid_provider_response")
+            return self._failed(
+                "create_pull_request",
+                "accepted_unaddressable",
+                private_target_ref=branch,
+            )
         return R1ControllerReceipt(
             action="create_pull_request",
             success=True,
             action_cost=1,
             private_pull_number=number,
         )
+
+    def reconcile_pull_request(self, branch_name: str, base_ref: str) -> int | None:
+        """One-shot read-only lookup used only to clean up an ambiguous accepted PR."""
+        branch = validate_r1_branch_name(branch_name)
+        base = _validate_base_ref(base_ref)
+        query = urlencode(
+            {
+                "state": "open",
+                "head": f"{self._owner}:{branch}",
+                "base": base,
+                "per_page": "2",
+            }
+        )
+        raw = self._read_json_list(f"/repos/{self._repository_path}/pulls?{query}")
+        if raw is None or len(raw) != 1:
+            return None
+        candidate = raw[0]
+        if not isinstance(candidate, dict):
+            return None
+        try:
+            number = _positive_int(candidate.get("number"))
+            if candidate.get("state") != "open":
+                return None
+            head = candidate.get("head")
+            base_payload = candidate.get("base")
+            if not isinstance(head, dict) or not isinstance(base_payload, dict):
+                return None
+            if head.get("ref") != branch or base_payload.get("ref") != base:
+                return None
+        except (TypeError, ValueError):
+            return None
+        return number
 
     def close_pull_request(self, pull_number: int) -> R1ControllerReceipt:
         number = _validate_pull_number(pull_number)
