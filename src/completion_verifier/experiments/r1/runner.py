@@ -25,7 +25,12 @@ from .orchestrator import (
     evaluate_attempt,
     seal_source_claim,
 )
-from .preflight import R1LivePermit, R1LiveTarget, validate_live_permit
+from .preflight import (
+    R1LivePermit,
+    R1LiveTarget,
+    consume_live_permit,
+    validate_live_permit,
+)
 from .scenarios import R1_SCENARIO_DEFINITIONS, R1ScenarioDefinition, get_r1_scenario
 
 
@@ -40,6 +45,7 @@ _RUNNER_ABORT_REASONS = frozenset(
         "live_permit_rejected",
         "live_repetition_limit",
         "privacy_sentinel_required",
+        "artifact_destination_unsafe",
         "action_budget_exceeded",
         "action_not_allowed",
         "action_argument_mismatch",
@@ -224,12 +230,7 @@ class R1ExperimentResult:
 
 
 class _GatedR1Controller:
-    """Bind a scaffold to one exact prepared mutation sequence.
-
-    The provider-facing controller may expose four methods, but the scaffold is
-    not allowed to choose different arguments, reorder them, repeat them, or
-    close any pull request except the one created by this attempt.
-    """
+    """Bind reviewed execution infrastructure to one prepared mutation sequence."""
 
     def __init__(
         self,
@@ -267,6 +268,7 @@ class _GatedR1Controller:
         if self._permit is not None and not validate_live_permit(
             self._permit,
             scenario_id=self._definition.scenario_id,
+            repository_locator=self._target.repository_locator,
             repository_id=self._target.repository_id,
             capabilities=self._definition.capabilities,
             actions_used=self.actions_used,
@@ -300,9 +302,7 @@ class _GatedR1Controller:
         if oid != self._task.base_oid or branch != self._task.branch_name:
             raise R1RunnerAbort("action_argument_mismatch")
         self._authorize("create_branch")
-        return self._record(
-            "create_branch", self._delegate.create_branch(oid, branch)
-        )
+        return self._record("create_branch", self._delegate.create_branch(oid, branch))
 
     def write_fixture(
         self,
@@ -329,10 +329,7 @@ class _GatedR1Controller:
         return self._record(
             "write_fixture",
             self._delegate.write_fixture(
-                branch,
-                path,
-                content,
-                existing_blob_sha=None,
+                branch, path, content, existing_blob_sha=None
             ),
         )
 
@@ -347,11 +344,9 @@ class _GatedR1Controller:
             raise R1RunnerAbort("action_argument_mismatch") from exc
         if branch != self._task.branch_name or base != self._task.base_ref:
             raise R1RunnerAbort("action_argument_mismatch")
-        # Every successful PR creation must leave one budgeted close available.
         self._authorize("create_pull_request", reserve_cleanup=True)
         receipt = self._record(
-            "create_pull_request",
-            self._delegate.create_pull_request(branch, base),
+            "create_pull_request", self._delegate.create_pull_request(branch, base)
         )
         if receipt.success:
             if receipt.private_pull_number is None:
@@ -374,6 +369,52 @@ class _GatedR1Controller:
         if receipt.success:
             self.open_pull_number = None
         return receipt
+
+
+class _ScaffoldControllerView:
+    """Trusted in-process adapter surface handed to a source scaffold.
+
+    This removes direct delegate exposure and reserves cleanup for the runner. It
+    is capability reduction, not a hostile-Python sandbox; an untrusted model is
+    expected to be mediated by trusted scaffold adapter code.
+    """
+
+    __slots__ = ("__gate",)
+
+    def __init__(self, gate: _GatedR1Controller) -> None:
+        self.__gate = gate
+
+    def create_branch(self, base_oid: str, branch_name: str) -> R1ControllerReceipt:
+        return self.__gate.create_branch(base_oid, branch_name)
+
+    def write_fixture(
+        self,
+        branch_name: str,
+        relative_path: str,
+        content: str,
+        *,
+        existing_blob_sha: str | None = None,
+    ) -> R1ControllerReceipt:
+        return self.__gate.write_fixture(
+            branch_name,
+            relative_path,
+            content,
+            existing_blob_sha=existing_blob_sha,
+        )
+
+    def create_pull_request(
+        self, branch_name: str, base_ref: str
+    ) -> R1ControllerReceipt:
+        return self.__gate.create_pull_request(branch_name, base_ref)
+
+    def close_pull_request(self, pull_number: int) -> R1ControllerReceipt:
+        try:
+            number = _validate_pull_number(pull_number)
+        except ValueError as exc:
+            raise R1RunnerAbort("action_argument_mismatch") from exc
+        if self.__gate.open_pull_number is None or number != self.__gate.open_pull_number:
+            raise R1RunnerAbort("action_argument_mismatch")
+        raise R1RunnerAbort("action_not_allowed")
 
 
 def preview_r1(
@@ -485,7 +526,6 @@ def _validate_scaffold_result(value: object) -> R1ScaffoldResult:
 
 
 def _cleanup_once(gated: _GatedR1Controller) -> R1ControllerReceipt | None:
-    """Attempt the one reserved close without retrying or masking a prior error."""
     number = gated.open_pull_number
     if number is None:
         return None
@@ -513,8 +553,11 @@ def _execute_attempt(
         max_actions=config.max_live_actions,
         permit=permit,
     )
+    scaffold_controller = _ScaffoldControllerView(gated)
     try:
-        scaffold_result = _validate_scaffold_result(scaffold.run(attempt.task, gated))
+        scaffold_result = _validate_scaffold_result(
+            scaffold.run(attempt.task, scaffold_controller)
+        )
     except Exception:
         _cleanup_once(gated)
         raise
@@ -558,12 +601,6 @@ def _automatic_private_literals(
     attempts: tuple[R1PreparedAttempt, ...],
     runs: tuple[R1RunRecord, ...],
 ) -> tuple[str, ...]:
-    """Collect distinctive private strings already known to the harness.
-
-    Short generic values and numeric identifiers remain protected by explicit
-    public serializers rather than substring matching, because values such as
-    `main`, `1`, or `7` can legitimately occur in unrelated public output.
-    """
     values: list[str] = [config.experiment_id]
     for item in attempts:
         values.extend(
@@ -623,6 +660,44 @@ def _result(
         manifest_verified=verified,
         live=live,
     )
+
+
+def _reserve_live_output(output_dir: Path) -> tuple[Path, str, bool]:
+    path = Path(output_dir)
+    created = False
+    marker = path / ".r1-reservation"
+    try:
+        if path.is_symlink():
+            raise ValueError
+        if path.exists():
+            if not path.is_dir() or any(path.iterdir()):
+                raise ValueError
+        else:
+            path.mkdir(parents=True, exist_ok=False)
+            created = True
+        with marker.open("x", encoding="utf-8") as handle:
+            handle.write("reserved\n")
+        marker.unlink()
+        return path, str(path.resolve()), created
+    except (OSError, ValueError):
+        try:
+            if marker.exists():
+                marker.unlink()
+            if created and path.exists() and not any(path.iterdir()):
+                path.rmdir()
+        except OSError:
+            pass
+        raise R1RunnerAbort("artifact_destination_unsafe")
+
+
+def _release_unused_live_output(path: Path, created: bool) -> None:
+    if not created:
+        return
+    try:
+        if path.exists() and path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+    except OSError:
+        pass
 
 
 def run_r1_dry(
@@ -708,12 +783,27 @@ def run_r1_live(
         if not validate_live_permit(
             permit,
             scenario_id=item.task.scenario_id,
+            repository_locator=item.target.repository_locator,
             repository_id=item.target.repository_id,
             capabilities=item_definition.capabilities,
             actions_used=0,
             action_cost=1,
         ):
             raise R1RunnerAbort("live_permit_rejected")
+
+    reserved_output, output_binding, created_output = _reserve_live_output(Path(output_dir))
+    first = attempts[0]
+    first_definition = get_r1_scenario(first.task.scenario_id)
+    if not consume_live_permit(
+        permit,
+        scenario_id=first.task.scenario_id,
+        repository_locator=first.target.repository_locator,
+        repository_id=first.target.repository_id,
+        capabilities=first_definition.capabilities,
+        output_binding=output_binding,
+    ):
+        _release_unused_live_output(reserved_output, created_output)
+        raise R1RunnerAbort("live_permit_rejected")
 
     runs = tuple(
         _execute_attempt(
@@ -730,7 +820,7 @@ def run_r1_live(
         config=config,
         attempts=attempts,
         runs=runs,
-        output_dir=Path(output_dir),
+        output_dir=reserved_output,
         live=True,
         forbidden_literals=forbidden_literals,
     )
