@@ -49,6 +49,19 @@ class R1PreflightBudgetRegressionTests(unittest.TestCase):
         self.assertEqual(result.reason_code, "capability_mismatch")
         self.assertIsNone(result.permit)
 
+    def test_preflight_rejects_non_live_scenario_from_closed_table(self) -> None:
+        result = run_preflight(
+            self._request(
+                scenario_id="S6",
+                requested_capabilities=(),
+                scenario_capabilities=(),
+                max_live_actions=1,
+            )
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason_code, "scenario_not_live_eligible")
+        self.assertIsNone(result.permit)
+
     def test_preflight_rejects_budget_too_small_for_full_reviewed_sequence(self) -> None:
         result = run_preflight(
             self._request(max_live_actions=len(R1_CONTROLLER_ACTIONS) - 1)
