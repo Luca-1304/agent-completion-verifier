@@ -7,7 +7,7 @@ from types import MappingProxyType
 from typing import Mapping, Protocol
 
 from ...remote.github import GitHubPullRequestContract
-from .artifacts import write_r1_artifacts, verify_r1_manifest
+from .artifacts import reserve_r1_output_dir, write_r1_artifacts, verify_r1_manifest
 from .controller import (
     DryRunR1Controller,
     R1Controller,
@@ -25,7 +25,12 @@ from .orchestrator import (
     evaluate_attempt,
     seal_source_claim,
 )
-from .preflight import R1LivePermit, R1LiveTarget, validate_live_permit
+from .preflight import (
+    R1LivePermit,
+    R1LiveTarget,
+    claim_live_permit,
+    validate_live_permit_target,
+)
 from .scenarios import R1_SCENARIO_DEFINITIONS, R1ScenarioDefinition, get_r1_scenario
 
 
@@ -33,6 +38,7 @@ _RUNNER_ABORT_REASONS = frozenset(
     {
         "dry_controller_required",
         "live_permit_required",
+        "live_permit_consumed",
         "live_mode_required",
         "dry_mode_required",
         "scenario_not_live_eligible",
@@ -264,10 +270,10 @@ class _GatedR1Controller:
         required = 1 + (1 if reserve_cleanup else 0)
         if self.actions_used + required > self._max_actions:
             raise R1RunnerAbort("action_budget_exceeded")
-        if self._permit is not None and not validate_live_permit(
+        if self._permit is not None and not validate_live_permit_target(
             self._permit,
             scenario_id=self._definition.scenario_id,
-            repository_id=self._target.repository_id,
+            target=self._target,
             capabilities=self._definition.capabilities,
             actions_used=self.actions_used,
             action_cost=required,
@@ -705,15 +711,21 @@ def run_r1_live(
             bound = False
         if bound is not True:
             raise R1RunnerAbort("controller_target_mismatch")
-        if not validate_live_permit(
+        if not validate_live_permit_target(
             permit,
             scenario_id=item.task.scenario_id,
-            repository_id=item.target.repository_id,
+            target=item.target,
             capabilities=item_definition.capabilities,
             actions_used=0,
             action_cost=1,
         ):
             raise R1RunnerAbort("live_permit_rejected")
+
+    # Prove the actual durable artifact destination before consuming the permit
+    # or allowing any provider-facing mutation.
+    reserve_r1_output_dir(Path(output_dir))
+    if not claim_live_permit(permit):
+        raise R1RunnerAbort("live_permit_consumed")
 
     runs = tuple(
         _execute_attempt(
