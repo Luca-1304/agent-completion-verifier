@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -131,14 +132,18 @@ class R1PreflightRequest:
 class R1LivePermit:
     _scenario_id: str
     _repository_id: int
+    _repository_locator: str
     _capabilities: tuple[str, ...]
     _max_live_actions: int
+    _claim_lock: object
+    _claimed: bool
 
     def __init__(
         self,
         *,
         scenario_id: str,
         repository_id: int,
+        repository_locator: str,
         capabilities: tuple[str, ...],
         max_live_actions: int,
         _key: object,
@@ -147,8 +152,11 @@ class R1LivePermit:
             raise ValueError("R1 live permits are issued only by successful preflight.")
         object.__setattr__(self, "_scenario_id", scenario_id)
         object.__setattr__(self, "_repository_id", repository_id)
+        object.__setattr__(self, "_repository_locator", _validate_locator(repository_locator))
         object.__setattr__(self, "_capabilities", tuple(capabilities))
         object.__setattr__(self, "_max_live_actions", max_live_actions)
+        object.__setattr__(self, "_claim_lock", threading.Lock())
+        object.__setattr__(self, "_claimed", False)
 
     def __repr__(self) -> str:
         return "R1LivePermit()"
@@ -266,11 +274,24 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
     permit = R1LivePermit(
         scenario_id=request.scenario_id,
         repository_id=request.target.repository_id,
+        repository_locator=request.target.repository_locator,
         capabilities=request.requested_capabilities,
         max_live_actions=request.max_live_actions,
         _key=_PERMIT_KEY,
     )
     return R1PreflightResult(True, "preflight_passed", permit)
+
+
+def claim_live_permit(permit: R1LivePermit) -> bool:
+    """Atomically claim one preflight permit for one live invocation."""
+    if not isinstance(permit, R1LivePermit):
+        return False
+    lock = permit._claim_lock
+    with lock:  # type: ignore[attr-defined]
+        if permit._claimed:
+            return False
+        object.__setattr__(permit, "_claimed", True)
+        return True
 
 
 def validate_live_permit(
@@ -297,4 +318,29 @@ def validate_live_permit(
         and repository_id == permit._repository_id
         and capabilities == permit._capabilities
         and actions_used + action_cost <= permit._max_live_actions
+    )
+
+
+def validate_live_permit_target(
+    permit: R1LivePermit,
+    *,
+    scenario_id: str,
+    target: R1LiveTarget,
+    capabilities: tuple[str, ...],
+    actions_used: int,
+    action_cost: int,
+) -> bool:
+    if not isinstance(target, R1LiveTarget):
+        return False
+    return (
+        isinstance(permit, R1LivePermit)
+        and target.repository_locator == permit._repository_locator
+        and validate_live_permit(
+            permit,
+            scenario_id=scenario_id,
+            repository_id=target.repository_id,
+            capabilities=capabilities,
+            actions_used=actions_used,
+            action_cost=action_cost,
+        )
     )
