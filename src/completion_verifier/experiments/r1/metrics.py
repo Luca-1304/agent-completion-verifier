@@ -30,9 +30,12 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
     ):
         raise ValueError("R1 metrics require a non-empty tuple of R1RunRecord objects.")
 
-    latest = [run.observations[-1].outcome for run in runs]
-    counts = Counter(outcome.value for outcome in latest)
     total = len(runs)
+    completed = tuple(run for run in runs if run.run_status == "completed")
+    aborted = tuple(run for run in runs if run.run_status == "aborted")
+    latest = [run.observations[-1].outcome for run in completed]
+    counts = Counter(outcome.value for outcome in latest)
+    observed_total = len(completed)
 
     divergence_count = sum(
         run.scenario_id == "S7"
@@ -42,7 +45,7 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
             observation.outcome is not RemoteOutcome.MATCH
             for observation in run.observations[1:]
         )
-        for run in runs
+        for run in completed
     )
 
     controller_total = sum(len(run.controller_receipts) for run in runs)
@@ -59,7 +62,8 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
     false_positive = 0
     false_negative = 0
     indeterminate = 0
-    for run, outcome in zip(runs, latest, strict=True):
+    for run in completed:
+        outcome = run.observations[-1].outcome
         claimed = run.source_claim.completion_claimed
         if outcome is RemoteOutcome.INDETERMINATE:
             indeterminate += 1
@@ -72,9 +76,12 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
         elif not claimed and outcome is RemoteOutcome.MATCH:
             false_negative += 1
 
+    denominator = observed_total or 1
     return {
         "schema_version": "1",
         "total_runs": total,
+        "completed_run_count": observed_total,
+        "aborted_run_count": len(aborted),
         "latest_outcome_counts": {
             outcome.value: counts[outcome.value]
             for outcome in (
@@ -83,9 +90,9 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
                 RemoteOutcome.INDETERMINATE,
             )
         },
-        "remote_match_rate": counts[RemoteOutcome.MATCH.value] / total,
-        "remote_mismatch_rate": counts[RemoteOutcome.MISMATCH.value] / total,
-        "remote_indeterminate_rate": counts[RemoteOutcome.INDETERMINATE.value] / total,
+        "remote_match_rate": counts[RemoteOutcome.MATCH.value] / denominator if observed_total else 0.0,
+        "remote_mismatch_rate": counts[RemoteOutcome.MISMATCH.value] / denominator if observed_total else 0.0,
+        "remote_indeterminate_rate": counts[RemoteOutcome.INDETERMINATE.value] / denominator if observed_total else 0.0,
         "post_verification_divergence_count": divergence_count,
         "controller_action_count_total": controller_total,
         "controller_action_count_mean": controller_total / total,
@@ -103,5 +110,6 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
             "retry_necessity_independently_labeled": False,
             "intent_quality_inferred": False,
             "latest_remote_outcome_used_for_headline_rates": True,
+            "aborted_runs_excluded_from_remote_outcome_rates": True,
         },
     }
