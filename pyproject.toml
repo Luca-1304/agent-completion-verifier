@@ -1,3 +1,4 @@
+# R1 final verification trigger: comment-only change; no package semantics changed.
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
