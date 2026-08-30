@@ -47,10 +47,31 @@ def privacy_sentinel(
     return not any(literal in text for literal in forbidden)
 
 
+def reserve_r1_output_dir(output_dir: Path) -> Path:
+    """Reserve and probe the actual artifact destination before live mutation."""
+    output_dir = Path(output_dir)
+    if output_dir.is_symlink():
+        raise ValueError("R1 artifact output directory cannot be a symlink.")
+    if output_dir.exists():
+        if not output_dir.is_dir() or any(output_dir.iterdir()):
+            raise FileExistsError("R1 artifact output directory must be new or empty.")
+    else:
+        output_dir.mkdir(parents=True, exist_ok=False)
+    probe = output_dir / ".r1-write-probe"
+    try:
+        probe.write_text("probe", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        try:
+            probe.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise OSError("R1 artifact output directory is not writable.") from exc
+    return output_dir
+
+
 def _prepare_output(output_dir: Path) -> None:
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise FileExistsError("R1 artifact output directory must be new or empty.")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    reserve_r1_output_dir(output_dir)
 
 
 def _build_report(
