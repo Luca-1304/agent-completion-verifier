@@ -4,7 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .models import R1_CONTROLLER_ACTIONS, R1_SCENARIOS
+from .models import R1_CONTROLLER_ACTIONS
+from .scenarios import get_r1_scenario
 
 
 _PREFLIGHT_REASONS = frozenset(
@@ -18,6 +19,7 @@ _PREFLIGHT_REASONS = frozenset(
         "target_locator_unverified",
         "target_protected",
         "scenario_unreviewed",
+        "scenario_not_live_eligible",
         "capability_mismatch",
         "action_budget_invalid",
         "action_budget_exhausted",
@@ -223,22 +225,28 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
     if request.target.repository_id in request.protected_repository_ids:
         return _reject("target_protected")
 
-    if request.scenario_id not in R1_SCENARIOS:
+    try:
+        definition = get_r1_scenario(request.scenario_id)
+    except ValueError:
         return _reject("scenario_unreviewed")
+    if not definition.live_eligible:
+        return _reject("scenario_not_live_eligible")
 
     try:
         requested = _validate_capabilities(
             request.requested_capabilities, "requested_capabilities"
         )
-        expected = _validate_capabilities(
+        declared = _validate_capabilities(
             request.scenario_capabilities, "scenario_capabilities"
         )
     except ValueError:
         return _reject("capability_mismatch")
+    trusted = definition.capabilities
     if (
-        requested != expected
+        requested != trusted
+        or declared != trusted
         or any(item not in R1_CONTROLLER_ACTIONS for item in requested)
-        or any(item not in R1_CONTROLLER_ACTIONS for item in expected)
+        or any(item not in R1_CONTROLLER_ACTIONS for item in declared)
     ):
         return _reject("capability_mismatch")
 
@@ -251,7 +259,10 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
         or request.actions_used < 0
     ):
         return _reject("action_budget_invalid")
-    if request.actions_used >= request.max_live_actions:
+    required_actions = len(trusted)
+    if request.max_live_actions < required_actions:
+        return _reject("action_budget_invalid")
+    if request.actions_used + required_actions > request.max_live_actions:
         return _reject("action_budget_exhausted")
 
     if not destination_new or not destination_writable:
@@ -266,7 +277,7 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
     permit = R1LivePermit(
         scenario_id=request.scenario_id,
         repository_id=request.target.repository_id,
-        capabilities=request.requested_capabilities,
+        capabilities=trusted,
         max_live_actions=request.max_live_actions,
         _key=_PERMIT_KEY,
     )
