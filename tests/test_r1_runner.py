@@ -287,7 +287,7 @@ class R1LiveRunnerTests(unittest.TestCase):
             with self.assertRaises(R1RunnerAbort) as raised:
                 run_r1_live(
                     config(live=True, max_actions=3),
-                    permit_for("S0", max_actions=3),
+                    permit_for("S0", max_actions=4),
                     controller,
                     SequenceVerifier((RemoteOutcome.MATCH,)),
                     Path(tmp) / "out",
