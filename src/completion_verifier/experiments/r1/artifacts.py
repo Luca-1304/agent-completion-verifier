@@ -60,6 +60,7 @@ def _build_report(
 ) -> str:
     scenarios = ", ".join(config.scenarios)
     cleanup_failures = metrics.get("cleanup_failure_count", 0)
+    aborted_runs = metrics.get("aborted_run_count", 0)
     return (
         "# R1 controlled real-provider experiment\n\n"
         "This artifact set records privacy-minimal experiment output. "
@@ -67,6 +68,7 @@ def _build_report(
         "or raw model text by default.\n\n"
         "## Scope\n\n"
         f"- Runs: {len(runs)}\n"
+        f"- Aborted before remote observation: {aborted_runs}\n"
         f"- Scenarios: {scenarios}\n"
         f"- Treatment: {config.treatment}\n"
         f"- Scaffold: {config.scaffold_id} {config.scaffold_version}\n"
@@ -132,7 +134,6 @@ def write_r1_artifacts(
     if forbidden and not privacy_sentinel(public_payloads, forbidden):
         raise ValueError("R1 public artifact privacy sentinel failed.")
 
-    # Validate all JSON material before creating durable files.
     config_text = json_text(public_config)
     runs_text = jsonl_text(public_runs)
     observations_text = jsonl_text(observations)
@@ -164,7 +165,7 @@ def write_r1_artifacts(
 def verify_r1_manifest(output_dir: Path) -> bool:
     output_dir = Path(output_dir)
     manifest_path = output_dir / "manifest.json"
-    if not manifest_path.is_file():
+    if not manifest_path.is_file() or manifest_path.is_symlink():
         raise ValueError("R1 manifest is missing.")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -178,10 +179,11 @@ def verify_r1_manifest(output_dir: Path) -> bool:
     if not isinstance(files, dict) or set(files) != set(_R1_ARTIFACT_FILES):
         raise ValueError("R1 manifest file mapping is invalid.")
 
-    actual_files = {
-        path.name for path in output_dir.iterdir() if path.is_file()
-    }
     expected_files = set(_R1_ARTIFACT_FILES) | {"manifest.json"}
+    entries = list(output_dir.iterdir())
+    if any(path.is_symlink() or not path.is_file() for path in entries):
+        raise ValueError("R1 artifact directory contains missing or untracked files.")
+    actual_files = {path.name for path in entries}
     if actual_files != expected_files:
         raise ValueError("R1 artifact directory contains missing or untracked files.")
 
@@ -190,6 +192,20 @@ def verify_r1_manifest(output_dir: Path) -> bool:
         if not isinstance(expected, str) or len(expected) != 64:
             raise ValueError("R1 manifest digest is invalid.")
         path = output_dir / name
-        if not path.is_file() or file_sha256(path) != expected:
+        if not path.is_file() or path.is_symlink() or file_sha256(path) != expected:
             raise ValueError("R1 manifest digest mismatch.")
+
+    try:
+        public_config = json.loads((output_dir / "config.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("R1 public configuration is invalid.") from exc
+    if not isinstance(public_config, dict):
+        raise ValueError("R1 public configuration is invalid.")
+    manifest_config_digest = manifest.get("public_config_digest")
+    if (
+        not isinstance(manifest_config_digest, str)
+        or len(manifest_config_digest) != 64
+        or canonical_json_sha256(public_config) != manifest_config_digest
+    ):
+        raise ValueError("R1 manifest configuration digest mismatch.")
     return True
