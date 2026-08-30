@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
+from completion_verifier.experiments.r1.models import R1_CONTROLLER_ACTIONS
 from completion_verifier.experiments.r1.preflight import (
     R1LivePermit,
     R1LiveTarget,
@@ -31,16 +32,8 @@ class R1PreflightTests(unittest.TestCase):
             "approved_repository_id": 9001,
             "target_locator_verified": True,
             "protected_repository_ids": frozenset({1307015021}),
-            "requested_capabilities": (
-                "create_branch",
-                "write_fixture",
-                "create_pull_request",
-            ),
-            "scenario_capabilities": (
-                "create_branch",
-                "write_fixture",
-                "create_pull_request",
-            ),
+            "requested_capabilities": R1_CONTROLLER_ACTIONS,
+            "scenario_capabilities": R1_CONTROLLER_ACTIONS,
             "max_live_actions": 4,
             "actions_used": 0,
             "artifact_destination_new": True,
@@ -107,12 +100,7 @@ class R1PreflightTests(unittest.TestCase):
     def test_capability_set_must_exactly_match_scenario(self) -> None:
         for requested in (
             ("create_branch",),
-            (
-                "create_branch",
-                "write_fixture",
-                "create_pull_request",
-                "close_pull_request",
-            ),
+            R1_CONTROLLER_ACTIONS[:-1],
             ("merge",),
         ):
             with self.subTest(requested=requested):
@@ -175,11 +163,7 @@ class R1PreflightTests(unittest.TestCase):
                 permit,
                 scenario_id="S0",
                 repository_id=9001,
-                capabilities=(
-                    "create_branch",
-                    "write_fixture",
-                    "create_pull_request",
-                ),
+                capabilities=R1_CONTROLLER_ACTIONS,
                 actions_used=0,
                 action_cost=1,
             )
@@ -194,11 +178,7 @@ class R1PreflightTests(unittest.TestCase):
             kwargs: dict[str, object] = {
                 "scenario_id": "S0",
                 "repository_id": 9001,
-                "capabilities": (
-                    "create_branch",
-                    "write_fixture",
-                    "create_pull_request",
-                ),
+                "capabilities": R1_CONTROLLER_ACTIONS,
                 "actions_used": 0,
                 "action_cost": 1,
             }
