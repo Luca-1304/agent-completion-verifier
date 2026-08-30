@@ -345,7 +345,8 @@ class R1AdversarialReviewTests(unittest.TestCase):
                     scaffold=ScriptedR1Scaffold(),
                     forbidden_literals=("IRRELEVANT_CALLER_SENTINEL",),
                 )
-            self.assertFalse(output.exists())
+            self.assertTrue(output.is_dir())
+            self.assertEqual(tuple(output.iterdir()), ())
 
     def test_live_target_locator_is_conservative_ascii_owner_repo_form(self) -> None:
         invalid = (
