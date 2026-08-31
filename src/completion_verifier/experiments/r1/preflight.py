@@ -48,7 +48,6 @@ def _positive_repository_id(value: object, name: str) -> int:
 
 
 def _validate_locator(value: object) -> str:
-    """Validate a deliberately conservative ASCII GitHub owner/repository locator."""
     if not isinstance(value, str) or not value or value != value.strip():
         raise ValueError("Repository locator must be a non-empty exact string.")
     if value.count("/") != 1 or "\\" in value or "\x00" in value:
@@ -263,7 +262,7 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
     ):
         return _reject("action_budget_invalid")
     required_actions = len(trusted)
-    if request.max_live_actions < required_actions:
+    if request.max_live_actions != required_actions:
         return _reject("action_budget_invalid")
     if request.actions_used + required_actions > request.max_live_actions:
         return _reject("action_budget_exhausted")
@@ -322,7 +321,6 @@ def validate_live_permit(
 
 
 def consume_live_permit(permit: R1LivePermit) -> bool:
-    """Atomically consume one permit. A live permit authorizes exactly one invocation."""
     if not isinstance(permit, R1LivePermit):
         return False
     with permit._consume_lock:
