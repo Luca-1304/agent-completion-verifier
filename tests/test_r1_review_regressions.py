@@ -168,9 +168,7 @@ class AlternateBranchScaffold:
 class WrongPullCloseScaffold:
     def run(self, task, controller):
         controller.create_branch(task.base_oid, task.branch_name)
-        controller.write_fixture(
-            task.branch_name, task.fixture_path, task.fixture_content
-        )
+        controller.write_fixture(task.branch_name, task.fixture_path, task.fixture_content)
         controller.create_pull_request(task.branch_name, task.base_ref)
         controller.close_pull_request(999)
         return R1ScaffoldResult(completion_claimed=True)
@@ -179,9 +177,7 @@ class WrongPullCloseScaffold:
 class DuplicatePullScaffold:
     def run(self, task, controller):
         controller.create_branch(task.base_oid, task.branch_name)
-        controller.write_fixture(
-            task.branch_name, task.fixture_path, task.fixture_content
-        )
+        controller.write_fixture(task.branch_name, task.fixture_path, task.fixture_content)
         controller.create_pull_request(task.branch_name, task.base_ref)
         controller.create_pull_request(task.branch_name, task.base_ref)
         return R1ScaffoldResult(completion_claimed=True)
@@ -227,7 +223,7 @@ class R1AdversarialReviewTests(unittest.TestCase):
             report = (result.output_dir / "report.md").read_text(encoding="utf-8")
             self.assertIn("Cleanup failures: 1", report)
 
-    def test_scaffold_cannot_change_the_prepared_branch_before_delegate_call(self) -> None:
+    def test_caller_defined_live_scaffold_cannot_change_prepared_branch(self) -> None:
         controller = RecordingController()
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(R1RunnerAbort) as raised:
@@ -241,10 +237,10 @@ class R1AdversarialReviewTests(unittest.TestCase):
                     scaffold=AlternateBranchScaffold(),
                     forbidden_literals=("PRIVATE_REVIEW_SENTINEL",),
                 )
-        self.assertEqual(raised.exception.reason_code, "action_argument_mismatch")
+        self.assertEqual(raised.exception.reason_code, "live_scaffold_untrusted")
         self.assertEqual(controller.calls, [])
 
-    def test_scaffold_cannot_close_an_untracked_pull_request(self) -> None:
+    def test_caller_defined_live_scaffold_cannot_close_any_pull_request(self) -> None:
         controller = RecordingController()
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(R1RunnerAbort) as raised:
@@ -258,14 +254,10 @@ class R1AdversarialReviewTests(unittest.TestCase):
                     scaffold=WrongPullCloseScaffold(),
                     forbidden_literals=("PRIVATE_REVIEW_SENTINEL",),
                 )
-        self.assertEqual(raised.exception.reason_code, "action_argument_mismatch")
-        self.assertEqual(
-            [call[0] for call in controller.calls],
-            ["create_branch", "write_fixture", "create_pull_request", "close_pull_request"],
-        )
-        self.assertEqual(controller.calls[-1], ("close_pull_request", 7))
+        self.assertEqual(raised.exception.reason_code, "live_scaffold_untrusted")
+        self.assertEqual(controller.calls, [])
 
-    def test_scaffold_cannot_create_two_pull_requests_even_when_budget_would_allow_it(self) -> None:
+    def test_caller_defined_live_scaffold_cannot_create_duplicate_pull_requests(self) -> None:
         controller = RecordingController()
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(R1RunnerAbort) as raised:
@@ -279,12 +271,8 @@ class R1AdversarialReviewTests(unittest.TestCase):
                     scaffold=DuplicatePullScaffold(),
                     forbidden_literals=("PRIVATE_REVIEW_SENTINEL",),
                 )
-        self.assertEqual(raised.exception.reason_code, "action_sequence_invalid")
-        self.assertEqual(
-            [call[0] for call in controller.calls],
-            ["create_branch", "write_fixture", "create_pull_request", "close_pull_request"],
-        )
-        self.assertEqual(controller.calls[-1], ("close_pull_request", 7))
+        self.assertEqual(raised.exception.reason_code, "live_scaffold_untrusted")
+        self.assertEqual(controller.calls, [])
 
     def test_initial_live_permit_cannot_authorize_multiple_repetitions(self) -> None:
         controller = RecordingController()
@@ -345,7 +333,8 @@ class R1AdversarialReviewTests(unittest.TestCase):
                     scaffold=ScriptedR1Scaffold(),
                     forbidden_literals=("IRRELEVANT_CALLER_SENTINEL",),
                 )
-            self.assertFalse(output.exists())
+            self.assertTrue(output.is_dir())
+            self.assertEqual(list(output.iterdir()), [])
 
     def test_live_target_locator_is_conservative_ascii_owner_repo_form(self) -> None:
         invalid = (
@@ -357,8 +346,8 @@ class R1AdversarialReviewTests(unittest.TestCase):
             "owner/repo%2Fother",
             "owner/repo?x=1",
             "owner/repo#frag",
-            "оwner/repo",  # Cyrillic o.
-            "owner/rеpo",  # Cyrillic e.
+            "оwner/repo",
+            "owner/rеpo",
         )
         for locator in invalid:
             with self.subTest(locator=locator), self.assertRaises(ValueError):
