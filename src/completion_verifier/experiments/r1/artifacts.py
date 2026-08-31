@@ -47,10 +47,31 @@ def privacy_sentinel(
     return not any(literal in text for literal in forbidden)
 
 
+def reserve_r1_output_dir(output_dir: Path) -> Path:
+    """Reserve and probe the actual artifact destination before live mutation."""
+    output_dir = Path(output_dir)
+    if output_dir.is_symlink():
+        raise ValueError("R1 artifact output directory cannot be a symlink.")
+    if output_dir.exists():
+        if not output_dir.is_dir() or any(output_dir.iterdir()):
+            raise FileExistsError("R1 artifact output directory must be new or empty.")
+    else:
+        output_dir.mkdir(parents=True, exist_ok=False)
+    probe = output_dir / ".r1-write-probe"
+    try:
+        probe.write_text("probe", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        try:
+            probe.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise OSError("R1 artifact output directory is not writable.") from exc
+    return output_dir
+
+
 def _prepare_output(output_dir: Path) -> None:
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise FileExistsError("R1 artifact output directory must be new or empty.")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    reserve_r1_output_dir(output_dir)
 
 
 def _build_report(
@@ -132,7 +153,6 @@ def write_r1_artifacts(
     if forbidden and not privacy_sentinel(public_payloads, forbidden):
         raise ValueError("R1 public artifact privacy sentinel failed.")
 
-    # Validate all JSON material before creating durable files.
     config_text = json_text(public_config)
     runs_text = jsonl_text(public_runs)
     observations_text = jsonl_text(observations)
@@ -147,9 +167,7 @@ def write_r1_artifacts(
     (output_dir / "metrics.json").write_text(metrics_text, encoding="utf-8")
     (output_dir / "report.md").write_text(report, encoding="utf-8")
 
-    file_digests = {
-        name: file_sha256(output_dir / name) for name in _R1_ARTIFACT_FILES
-    }
+    file_digests = {name: file_sha256(output_dir / name) for name in _R1_ARTIFACT_FILES}
     manifest = {
         "schema_version": "1",
         "artifact_kind": "r1_public_experiment",
@@ -164,7 +182,7 @@ def write_r1_artifacts(
 def verify_r1_manifest(output_dir: Path) -> bool:
     output_dir = Path(output_dir)
     manifest_path = output_dir / "manifest.json"
-    if not manifest_path.is_file():
+    if manifest_path.is_symlink() or not manifest_path.is_file():
         raise ValueError("R1 manifest is missing.")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -178,11 +196,14 @@ def verify_r1_manifest(output_dir: Path) -> bool:
     if not isinstance(files, dict) or set(files) != set(_R1_ARTIFACT_FILES):
         raise ValueError("R1 manifest file mapping is invalid.")
 
-    actual_files = {
-        path.name for path in output_dir.iterdir() if path.is_file()
-    }
     expected_files = set(_R1_ARTIFACT_FILES) | {"manifest.json"}
-    if actual_files != expected_files:
+    actual_entries = tuple(output_dir.iterdir())
+    if any(
+        entry.name not in expected_files or entry.is_symlink() or not entry.is_file()
+        for entry in actual_entries
+    ):
+        raise ValueError("R1 artifact directory contains missing or untracked files.")
+    if {entry.name for entry in actual_entries} != expected_files:
         raise ValueError("R1 artifact directory contains missing or untracked files.")
 
     for name in _R1_ARTIFACT_FILES:
@@ -190,6 +211,21 @@ def verify_r1_manifest(output_dir: Path) -> bool:
         if not isinstance(expected, str) or len(expected) != 64:
             raise ValueError("R1 manifest digest is invalid.")
         path = output_dir / name
-        if not path.is_file() or file_sha256(path) != expected:
+        if path.is_symlink() or not path.is_file() or file_sha256(path) != expected:
             raise ValueError("R1 manifest digest mismatch.")
+
+    config_path = output_dir / "config.json"
+    try:
+        public_config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("R1 public config is invalid.") from exc
+    if not isinstance(public_config, dict):
+        raise ValueError("R1 public config is invalid.")
+    expected_config_digest = manifest.get("public_config_digest")
+    if (
+        not isinstance(expected_config_digest, str)
+        or len(expected_config_digest) != 64
+        or canonical_json_sha256(public_config) != expected_config_digest
+    ):
+        raise ValueError("R1 public config digest mismatch.")
     return True
