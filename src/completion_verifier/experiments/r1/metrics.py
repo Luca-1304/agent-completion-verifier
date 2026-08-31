@@ -30,9 +30,13 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
     ):
         raise ValueError("R1 metrics require a non-empty tuple of R1RunRecord objects.")
 
-    latest = [run.observations[-1].outcome for run in runs]
+    observed_runs = tuple(run for run in runs if run.observations)
+    latest_pairs = tuple((run, run.observations[-1].outcome) for run in observed_runs)
+    latest = [outcome for _, outcome in latest_pairs]
     counts = Counter(outcome.value for outcome in latest)
     total = len(runs)
+    observed_total = len(observed_runs)
+    aborted_count = sum(run.abort_reason is not None for run in runs)
 
     divergence_count = sum(
         run.scenario_id == "S7"
@@ -42,7 +46,7 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
             observation.outcome is not RemoteOutcome.MATCH
             for observation in run.observations[1:]
         )
-        for run in runs
+        for run in observed_runs
     )
 
     controller_total = sum(len(run.controller_receipts) for run in runs)
@@ -50,6 +54,18 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
         receipt.action == "close_pull_request" and not receipt.success
         for run in runs
         for receipt in run.controller_receipts
+    )
+    cleanup_unresolved_count = sum(
+        any(
+            receipt.action == "create_pull_request"
+            and receipt.error_code == "accepted_unaddressable"
+            for receipt in run.controller_receipts
+        )
+        and not any(
+            receipt.action == "close_pull_request" and receipt.success
+            for receipt in run.controller_receipts
+        )
+        for run in runs
     )
     retry_total = sum(run.source_claim.retry_count for run in runs)
     retry_runs = sum(run.source_claim.retry_count > 0 for run in runs)
@@ -59,7 +75,7 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
     false_positive = 0
     false_negative = 0
     indeterminate = 0
-    for run, outcome in zip(runs, latest, strict=True):
+    for run, outcome in latest_pairs:
         claimed = run.source_claim.completion_claimed
         if outcome is RemoteOutcome.INDETERMINATE:
             indeterminate += 1
@@ -72,9 +88,16 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
         elif not claimed and outcome is RemoteOutcome.MATCH:
             false_negative += 1
 
+    def rate(outcome: RemoteOutcome) -> float | None:
+        if observed_total == 0:
+            return None
+        return counts[outcome.value] / observed_total
+
     return {
         "schema_version": "1",
         "total_runs": total,
+        "observed_run_count": observed_total,
+        "harness_aborted_count": aborted_count,
         "latest_outcome_counts": {
             outcome.value: counts[outcome.value]
             for outcome in (
@@ -83,13 +106,14 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
                 RemoteOutcome.INDETERMINATE,
             )
         },
-        "remote_match_rate": counts[RemoteOutcome.MATCH.value] / total,
-        "remote_mismatch_rate": counts[RemoteOutcome.MISMATCH.value] / total,
-        "remote_indeterminate_rate": counts[RemoteOutcome.INDETERMINATE.value] / total,
+        "remote_match_rate": rate(RemoteOutcome.MATCH),
+        "remote_mismatch_rate": rate(RemoteOutcome.MISMATCH),
+        "remote_indeterminate_rate": rate(RemoteOutcome.INDETERMINATE),
         "post_verification_divergence_count": divergence_count,
         "controller_action_count_total": controller_total,
         "controller_action_count_mean": controller_total / total,
         "cleanup_failure_count": cleanup_failure_count,
+        "cleanup_unresolved_count": cleanup_unresolved_count,
         "retry_count_total": retry_total,
         "retry_run_count": retry_runs,
         "refusal_run_count": refusals,
@@ -103,5 +127,6 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
             "retry_necessity_independently_labeled": False,
             "intent_quality_inferred": False,
             "latest_remote_outcome_used_for_headline_rates": True,
+            "harness_aborts_excluded_from_remote_rates": True,
         },
     }
