@@ -328,7 +328,12 @@ class GitHubR1ControllerBoundaryTests(unittest.TestCase):
                 else:
                     receipt = controller.close_pull_request(17)
                 self.assertFalse(receipt.success)
-                self.assertEqual(receipt.error_code, "invalid_provider_response")
+                expected = (
+                    "accepted_unaddressable"
+                    if kind == "pr"
+                    else "invalid_provider_response"
+                )
+                self.assertEqual(receipt.error_code, expected)
 
 
 if __name__ == "__main__":
