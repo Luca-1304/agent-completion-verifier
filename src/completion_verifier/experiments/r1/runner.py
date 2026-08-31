@@ -25,7 +25,12 @@ from .orchestrator import (
     evaluate_attempt,
     seal_source_claim,
 )
-from .preflight import R1LivePermit, R1LiveTarget, validate_live_permit
+from .preflight import (
+    R1LivePermit,
+    R1LiveTarget,
+    consume_live_permit,
+    validate_live_permit,
+)
 from .scenarios import R1_SCENARIO_DEFINITIONS, R1ScenarioDefinition, get_r1_scenario
 
 
@@ -33,13 +38,16 @@ _RUNNER_ABORT_REASONS = frozenset(
     {
         "dry_controller_required",
         "live_permit_required",
+        "live_permit_consumed",
         "live_mode_required",
         "dry_mode_required",
         "scenario_not_live_eligible",
         "controller_target_mismatch",
         "live_permit_rejected",
         "live_repetition_limit",
+        "live_scaffold_untrusted",
         "privacy_sentinel_required",
+        "artifact_destination_unsafe",
         "action_budget_exceeded",
         "action_not_allowed",
         "action_argument_mismatch",
@@ -224,12 +232,7 @@ class R1ExperimentResult:
 
 
 class _GatedR1Controller:
-    """Bind a scaffold to one exact prepared mutation sequence.
-
-    The provider-facing controller may expose four methods, but the scaffold is
-    not allowed to choose different arguments, reorder them, repeat them, or
-    close any pull request except the one created by this attempt.
-    """
+    """Bind one attempt to an exact action sequence and runner-owned cleanup."""
 
     def __init__(
         self,
@@ -264,15 +267,6 @@ class _GatedR1Controller:
         required = 1 + (1 if reserve_cleanup else 0)
         if self.actions_used + required > self._max_actions:
             raise R1RunnerAbort("action_budget_exceeded")
-        if self._permit is not None and not validate_live_permit(
-            self._permit,
-            scenario_id=self._definition.scenario_id,
-            repository_id=self._target.repository_id,
-            capabilities=self._definition.capabilities,
-            actions_used=self.actions_used,
-            action_cost=required,
-        ):
-            raise R1RunnerAbort("live_permit_rejected")
 
     def _require_sequence(self, expected: tuple[str, ...]) -> None:
         if self._action_names != expected:
@@ -300,9 +294,7 @@ class _GatedR1Controller:
         if oid != self._task.base_oid or branch != self._task.branch_name:
             raise R1RunnerAbort("action_argument_mismatch")
         self._authorize("create_branch")
-        return self._record(
-            "create_branch", self._delegate.create_branch(oid, branch)
-        )
+        return self._record("create_branch", self._delegate.create_branch(oid, branch))
 
     def write_fixture(
         self,
@@ -347,7 +339,6 @@ class _GatedR1Controller:
             raise R1RunnerAbort("action_argument_mismatch") from exc
         if branch != self._task.branch_name or base != self._task.base_ref:
             raise R1RunnerAbort("action_argument_mismatch")
-        # Every successful PR creation must leave one budgeted close available.
         self._authorize("create_pull_request", reserve_cleanup=True)
         receipt = self._record(
             "create_pull_request",
@@ -360,11 +351,36 @@ class _GatedR1Controller:
         return receipt
 
     def close_pull_request(self, pull_number: int) -> R1ControllerReceipt:
-        self._require_sequence(("create_branch", "write_fixture", "create_pull_request"))
+        """Scaffolds cannot consume the runner-reserved cleanup action."""
         try:
             number = _validate_pull_number(pull_number)
         except ValueError as exc:
             raise R1RunnerAbort("action_argument_mismatch") from exc
+        if self.open_pull_number is None or number != self.open_pull_number:
+            raise R1RunnerAbort("action_argument_mismatch")
+        raise R1RunnerAbort("action_not_allowed")
+
+    def _runner_close_pull_request(
+        self,
+        pull_number: int,
+        *,
+        after_accepted_unaddressable: bool = False,
+    ) -> R1ControllerReceipt:
+        number = _validate_pull_number(pull_number)
+        expected = ("create_branch", "write_fixture", "create_pull_request")
+        if self._action_names != expected:
+            raise R1RunnerAbort("action_sequence_invalid")
+        if after_accepted_unaddressable:
+            first, second, third = self.receipts
+            if (
+                not first.success
+                or not second.success
+                or third.success
+                or third.error_code != "accepted_unaddressable"
+            ):
+                raise R1RunnerAbort("action_sequence_invalid")
+        elif any(not receipt.success for receipt in self.receipts):
+            raise R1RunnerAbort("action_sequence_invalid")
         if self.open_pull_number is None or number != self.open_pull_number:
             raise R1RunnerAbort("action_argument_mismatch")
         self._authorize("close_pull_request")
@@ -475,6 +491,7 @@ def _append_cleanup_receipt(
         observations=run.observations,
         evaluations=run.evaluations,
         verification_latency_ms=run.verification_latency_ms,
+        abort_reason=run.abort_reason,
     )
 
 
@@ -484,15 +501,69 @@ def _validate_scaffold_result(value: object) -> R1ScaffoldResult:
     return value
 
 
-def _cleanup_once(gated: _GatedR1Controller) -> R1ControllerReceipt | None:
-    """Attempt the one reserved close without retrying or masking a prior error."""
-    number = gated.open_pull_number
-    if number is None:
+def _reconcile_accepted_unaddressable(
+    gated: _GatedR1Controller,
+) -> R1ControllerReceipt | None:
+    if gated.open_pull_number is not None or not gated.receipts:
+        return None
+    last = gated.receipts[-1]
+    if (
+        last.action != "create_pull_request"
+        or last.success
+        or last.error_code != "accepted_unaddressable"
+    ):
+        return None
+    reconciler = getattr(gated._delegate, "_reconcile_open_pull_request", None)
+    if not callable(reconciler):
         return None
     try:
-        return gated.close_pull_request(number)
+        number = reconciler(gated._task.branch_name, gated._task.base_ref)
+        number = _validate_pull_number(number)
     except Exception:
         return None
+    gated.open_pull_number = number
+    try:
+        return gated._runner_close_pull_request(
+            number, after_accepted_unaddressable=True
+        )
+    except Exception:
+        return None
+
+
+def _cleanup_once(gated: _GatedR1Controller) -> R1ControllerReceipt | None:
+    """Attempt one runner-owned cleanup without retrying or masking a prior error."""
+    if gated.open_pull_number is None:
+        return _reconcile_accepted_unaddressable(gated)
+    try:
+        return gated._runner_close_pull_request(gated.open_pull_number)
+    except Exception:
+        return None
+
+
+def _aborted_controller_run(
+    *,
+    attempt: R1PreparedAttempt,
+    scaffold_result: R1ScaffoldResult,
+    gated: _GatedR1Controller,
+    source_action_count: int,
+) -> R1RunRecord:
+    _cleanup_once(gated)
+    source_claim = seal_source_claim(
+        completion_claimed=scaffold_result.completion_claimed,
+        retry_count=scaffold_result.retry_count,
+        refusal=scaffold_result.refusal,
+        action_count=source_action_count,
+        private_trace_ref=scaffold_result.private_trace_ref,
+    )
+    return R1RunRecord(
+        scenario_id=attempt.task.scenario_id,
+        source_claim=source_claim,
+        controller_receipts=tuple(gated.receipts),
+        observations=(),
+        evaluations=(),
+        verification_latency_ms=(),
+        abort_reason="controller_failure",
+    )
 
 
 def _execute_attempt(
@@ -519,12 +590,21 @@ def _execute_attempt(
         _cleanup_once(gated)
         raise
 
+    source_action_count = len(gated.receipts)
+    if any(not receipt.success for receipt in gated.receipts):
+        return _aborted_controller_run(
+            attempt=attempt,
+            scaffold_result=scaffold_result,
+            gated=gated,
+            source_action_count=source_action_count,
+        )
+
     try:
         source_claim: R1SourceClaim = seal_source_claim(
             completion_claimed=scaffold_result.completion_claimed,
             retry_count=scaffold_result.retry_count,
             refusal=scaffold_result.refusal,
-            action_count=len(gated.receipts),
+            action_count=source_action_count,
             private_trace_ref=scaffold_result.private_trace_ref,
         )
         contract = _build_contract(attempt, gated.receipts)
@@ -540,7 +620,7 @@ def _execute_attempt(
         raise
 
     if gated.open_pull_number is not None:
-        cleanup = gated.close_pull_request(gated.open_pull_number)
+        cleanup = gated._runner_close_pull_request(gated.open_pull_number)
         if definition.second_read:
             run = append_explicit_second_observation(
                 run,
@@ -558,12 +638,6 @@ def _automatic_private_literals(
     attempts: tuple[R1PreparedAttempt, ...],
     runs: tuple[R1RunRecord, ...],
 ) -> tuple[str, ...]:
-    """Collect distinctive private strings already known to the harness.
-
-    Short generic values and numeric identifiers remain protected by explicit
-    public serializers rather than substring matching, because values such as
-    `main`, `1`, or `7` can legitimately occur in unrelated public output.
-    """
     values: list[str] = [config.experiment_id]
     for item in attempts:
         values.extend(
@@ -623,6 +697,38 @@ def _result(
         manifest_verified=verified,
         live=live,
     )
+
+
+def _reserve_live_output(output_dir: Path) -> Path:
+    path = Path(output_dir)
+    if path.exists() or path.is_symlink():
+        raise R1RunnerAbort("artifact_destination_unsafe")
+    for parent in path.parents:
+        if parent.exists():
+            if parent.is_symlink() or not parent.is_dir():
+                raise R1RunnerAbort("artifact_destination_unsafe")
+            break
+    try:
+        path.mkdir(parents=True, exist_ok=False)
+        probe = path / ".r1-reservation"
+        probe.write_text("reserved\n", encoding="utf-8")
+        probe.unlink()
+    except (OSError, UnicodeError):
+        try:
+            if path.exists() and not any(path.iterdir()):
+                path.rmdir()
+        except OSError:
+            pass
+        raise R1RunnerAbort("artifact_destination_unsafe") from None
+    return path
+
+
+def _release_empty_reservation(path: Path) -> None:
+    try:
+        if path.is_dir() and not path.is_symlink() and not any(path.iterdir()):
+            path.rmdir()
+    except OSError:
+        pass
 
 
 def run_r1_dry(
@@ -687,6 +793,8 @@ def run_r1_live(
         raise R1RunnerAbort("live_permit_required")
     if len(config.scenarios) != 1:
         raise ValueError("One R1 live invocation is bound to exactly one scenario permit.")
+    if type(scaffold) is not ScriptedR1Scaffold:
+        raise R1RunnerAbort("live_scaffold_untrusted")
 
     definition = get_r1_scenario(config.scenarios[0])
     if not definition.live_eligible:
@@ -708,12 +816,18 @@ def run_r1_live(
         if not validate_live_permit(
             permit,
             scenario_id=item.task.scenario_id,
+            repository_locator=item.target.repository_locator,
             repository_id=item.target.repository_id,
             capabilities=item_definition.capabilities,
             actions_used=0,
             action_cost=1,
         ):
             raise R1RunnerAbort("live_permit_rejected")
+
+    reserved_output = _reserve_live_output(Path(output_dir))
+    if not consume_live_permit(permit):
+        _release_empty_reservation(reserved_output)
+        raise R1RunnerAbort("live_permit_consumed")
 
     runs = tuple(
         _execute_attempt(
@@ -730,7 +844,7 @@ def run_r1_live(
         config=config,
         attempts=attempts,
         runs=runs,
-        output_dir=Path(output_dir),
+        output_dir=reserved_output,
         live=True,
         forbidden_literals=forbidden_literals,
     )
