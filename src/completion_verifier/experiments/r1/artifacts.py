@@ -60,6 +60,8 @@ def _build_report(
 ) -> str:
     scenarios = ", ".join(config.scenarios)
     cleanup_failures = metrics.get("cleanup_failure_count", 0)
+    cleanup_unresolved = metrics.get("cleanup_unresolved_count", 0)
+    aborted = metrics.get("harness_aborted_count", 0)
     return (
         "# R1 controlled real-provider experiment\n\n"
         "This artifact set records privacy-minimal experiment output. "
@@ -70,10 +72,13 @@ def _build_report(
         f"- Scenarios: {scenarios}\n"
         f"- Treatment: {config.treatment}\n"
         f"- Scaffold: {config.scaffold_id} {config.scaffold_version}\n"
+        f"- Harness-aborted runs: {aborted}\n"
         f"- Cleanup failures: {cleanup_failures}\n"
+        f"- Unresolved cleanup risks: {cleanup_unresolved}\n"
         "\nA verifier MATCH means the reviewed remote contract matched the authenticated "
         "observation at that observation point. It does not prove causality, user "
-        "authorization, permanence, provider integrity, or production safety.\n"
+        "authorization, permanence, provider integrity, or production safety. "
+        "Harness-aborted attempts are retained without inventing remote observations.\n"
     )
 
 
@@ -132,7 +137,6 @@ def write_r1_artifacts(
     if forbidden and not privacy_sentinel(public_payloads, forbidden):
         raise ValueError("R1 public artifact privacy sentinel failed.")
 
-    # Validate all JSON material before creating durable files.
     config_text = json_text(public_config)
     runs_text = jsonl_text(public_runs)
     observations_text = jsonl_text(observations)
@@ -163,8 +167,10 @@ def write_r1_artifacts(
 
 def verify_r1_manifest(output_dir: Path) -> bool:
     output_dir = Path(output_dir)
+    if output_dir.is_symlink() or not output_dir.is_dir():
+        raise ValueError("R1 artifact directory is invalid.")
     manifest_path = output_dir / "manifest.json"
-    if not manifest_path.is_file():
+    if manifest_path.is_symlink() or not manifest_path.is_file():
         raise ValueError("R1 manifest is missing.")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -178,18 +184,32 @@ def verify_r1_manifest(output_dir: Path) -> bool:
     if not isinstance(files, dict) or set(files) != set(_R1_ARTIFACT_FILES):
         raise ValueError("R1 manifest file mapping is invalid.")
 
-    actual_files = {
-        path.name for path in output_dir.iterdir() if path.is_file()
-    }
-    expected_files = set(_R1_ARTIFACT_FILES) | {"manifest.json"}
-    if actual_files != expected_files:
-        raise ValueError("R1 artifact directory contains missing or untracked files.")
+    expected_entries = set(_R1_ARTIFACT_FILES) | {"manifest.json"}
+    descendants = list(output_dir.rglob("*"))
+    actual_entries = {path.relative_to(output_dir).as_posix() for path in descendants}
+    if actual_entries != expected_entries:
+        raise ValueError("R1 artifact directory contains missing or untracked entries.")
+    if any(path.is_symlink() or not path.is_file() for path in descendants):
+        raise ValueError("R1 artifact directory contains unsupported entry types.")
+
+    config_path = output_dir / "config.json"
+    try:
+        public_config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("R1 public configuration is invalid.") from exc
+    config_digest = manifest.get("public_config_digest")
+    if (
+        not isinstance(config_digest, str)
+        or len(config_digest) != 64
+        or canonical_json_sha256(public_config) != config_digest
+    ):
+        raise ValueError("R1 public configuration digest mismatch.")
 
     for name in _R1_ARTIFACT_FILES:
         expected = files.get(name)
         if not isinstance(expected, str) or len(expected) != 64:
             raise ValueError("R1 manifest digest is invalid.")
         path = output_dir / name
-        if not path.is_file() or file_sha256(path) != expected:
+        if path.is_symlink() or not path.is_file() or file_sha256(path) != expected:
             raise ValueError("R1 manifest digest mismatch.")
     return True
