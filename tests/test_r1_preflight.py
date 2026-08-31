@@ -162,6 +162,7 @@ class R1PreflightTests(unittest.TestCase):
             validate_live_permit(
                 permit,
                 scenario_id="S0",
+                repository_locator="PRIVATE_OWNER/PRIVATE_DISPOSABLE_REPO",
                 repository_id=9001,
                 capabilities=R1_CONTROLLER_ACTIONS,
                 actions_used=0,
@@ -170,6 +171,7 @@ class R1PreflightTests(unittest.TestCase):
         )
         for changes in (
             {"scenario_id": "S1"},
+            {"repository_locator": "OTHER_OWNER/OTHER_DISPOSABLE_REPO"},
             {"repository_id": 9002},
             {"capabilities": ("create_branch",)},
             {"actions_used": 4},
@@ -177,6 +179,7 @@ class R1PreflightTests(unittest.TestCase):
         ):
             kwargs: dict[str, object] = {
                 "scenario_id": "S0",
+                "repository_locator": "PRIVATE_OWNER/PRIVATE_DISPOSABLE_REPO",
                 "repository_id": 9001,
                 "capabilities": R1_CONTROLLER_ACTIONS,
                 "actions_used": 0,
