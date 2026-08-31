@@ -113,25 +113,15 @@ class R1ContractExpectation:
         if self.expected_state not in {"open", "closed", "merged"}:
             raise ValueError("R1 expected state must be open, closed, or merged.")
         if self.expected_head_oid is not None:
-            object.__setattr__(
-                self, "expected_head_oid", _validate_oid(self.expected_head_oid)
-            )
+            object.__setattr__(self, "expected_head_oid", _validate_oid(self.expected_head_oid))
         if self.expected_base_ref is not None:
-            object.__setattr__(
-                self, "expected_base_ref", _validate_base_ref(self.expected_base_ref)
-            )
+            object.__setattr__(self, "expected_base_ref", _validate_base_ref(self.expected_base_ref))
         if self.expected_pull_number is not None:
-            object.__setattr__(
-                self,
-                "expected_pull_number",
-                _validate_pull_number(self.expected_pull_number),
-            )
+            object.__setattr__(self, "expected_pull_number", _validate_pull_number(self.expected_pull_number))
         if self.expected_merge_oid is not None:
             if self.expected_state != "merged":
                 raise ValueError("R1 expected merge object ID requires merged state.")
-            object.__setattr__(
-                self, "expected_merge_oid", _validate_oid(self.expected_merge_oid)
-            )
+            object.__setattr__(self, "expected_merge_oid", _validate_oid(self.expected_merge_oid))
 
     def __repr__(self) -> str:
         return "R1ContractExpectation()"
@@ -165,11 +155,7 @@ class R1ScaffoldResult:
     def __post_init__(self) -> None:
         if not isinstance(self.completion_claimed, bool):
             raise ValueError("R1 scaffold completion claim must be boolean.")
-        if (
-            isinstance(self.retry_count, bool)
-            or not isinstance(self.retry_count, int)
-            or self.retry_count < 0
-        ):
+        if isinstance(self.retry_count, bool) or not isinstance(self.retry_count, int) or self.retry_count < 0:
             raise ValueError("R1 scaffold retry count must be a non-negative integer.")
         if not isinstance(self.refusal, bool):
             raise ValueError("R1 scaffold refusal flag must be boolean.")
@@ -196,15 +182,10 @@ class ScriptedR1Scaffold:
         definition = get_r1_scenario(task.scenario_id)
         if not definition.capabilities:
             return R1ScaffoldResult(completion_claimed=True)
-
         branch = controller.create_branch(task.base_oid, task.branch_name)
         if not branch.success:
             return R1ScaffoldResult(completion_claimed=False)
-        write = controller.write_fixture(
-            task.branch_name,
-            task.fixture_path,
-            task.fixture_content,
-        )
+        write = controller.write_fixture(task.branch_name, task.fixture_path, task.fixture_content)
         if not write.success:
             return R1ScaffoldResult(completion_claimed=False)
         pull = controller.create_pull_request(task.branch_name, task.base_ref)
@@ -232,18 +213,7 @@ class R1ExperimentResult:
 
 
 class _GatedR1Controller:
-    """Bind one attempt to an exact action sequence and runner-owned cleanup."""
-
-    def __init__(
-        self,
-        delegate: R1Controller,
-        *,
-        target: R1LiveTarget,
-        task: R1BoundedTask,
-        definition: R1ScenarioDefinition,
-        max_actions: int,
-        permit: R1LivePermit | None,
-    ) -> None:
+    def __init__(self, delegate: R1Controller, *, target: R1LiveTarget, task: R1BoundedTask, definition: R1ScenarioDefinition, max_actions: int, permit: R1LivePermit | None) -> None:
         self._delegate = delegate
         self._target = target
         self._task = task
@@ -275,11 +245,7 @@ class _GatedR1Controller:
             raise R1RunnerAbort("action_sequence_invalid")
 
     def _record(self, expected_action: str, receipt: object) -> R1ControllerReceipt:
-        if (
-            not isinstance(receipt, R1ControllerReceipt)
-            or receipt.action != expected_action
-            or receipt.action_cost != 1
-        ):
+        if not isinstance(receipt, R1ControllerReceipt) or receipt.action != expected_action or receipt.action_cost != 1:
             raise R1RunnerAbort("invalid_controller_receipt")
         self.receipts.append(receipt)
         return receipt
@@ -296,41 +262,19 @@ class _GatedR1Controller:
         self._authorize("create_branch")
         return self._record("create_branch", self._delegate.create_branch(oid, branch))
 
-    def write_fixture(
-        self,
-        branch_name: str,
-        relative_path: str,
-        content: str,
-        *,
-        existing_blob_sha: str | None = None,
-    ) -> R1ControllerReceipt:
+    def write_fixture(self, branch_name: str, relative_path: str, content: str, *, existing_blob_sha: str | None = None) -> R1ControllerReceipt:
         self._require_sequence(("create_branch",))
         try:
             branch = validate_r1_branch_name(branch_name)
             path = validate_r1_fixture_path(relative_path)
         except ValueError as exc:
             raise R1RunnerAbort("action_argument_mismatch") from exc
-        if (
-            branch != self._task.branch_name
-            or path != self._task.fixture_path
-            or content != self._task.fixture_content
-            or existing_blob_sha is not None
-        ):
+        if branch != self._task.branch_name or path != self._task.fixture_path or content != self._task.fixture_content or existing_blob_sha is not None:
             raise R1RunnerAbort("action_argument_mismatch")
         self._authorize("write_fixture")
-        return self._record(
-            "write_fixture",
-            self._delegate.write_fixture(
-                branch,
-                path,
-                content,
-                existing_blob_sha=None,
-            ),
-        )
+        return self._record("write_fixture", self._delegate.write_fixture(branch, path, content, existing_blob_sha=None))
 
-    def create_pull_request(
-        self, branch_name: str, base_ref: str
-    ) -> R1ControllerReceipt:
+    def create_pull_request(self, branch_name: str, base_ref: str) -> R1ControllerReceipt:
         self._require_sequence(("create_branch", "write_fixture"))
         try:
             branch = validate_r1_branch_name(branch_name)
@@ -340,10 +284,7 @@ class _GatedR1Controller:
         if branch != self._task.branch_name or base != self._task.base_ref:
             raise R1RunnerAbort("action_argument_mismatch")
         self._authorize("create_pull_request", reserve_cleanup=True)
-        receipt = self._record(
-            "create_pull_request",
-            self._delegate.create_pull_request(branch, base),
-        )
+        receipt = self._record("create_pull_request", self._delegate.create_pull_request(branch, base))
         if receipt.success:
             if receipt.private_pull_number is None:
                 raise R1RunnerAbort("invalid_controller_receipt")
@@ -351,7 +292,6 @@ class _GatedR1Controller:
         return receipt
 
     def close_pull_request(self, pull_number: int) -> R1ControllerReceipt:
-        """Scaffolds cannot consume the runner-reserved cleanup action."""
         try:
             number = _validate_pull_number(pull_number)
         except ValueError as exc:
@@ -360,42 +300,27 @@ class _GatedR1Controller:
             raise R1RunnerAbort("action_argument_mismatch")
         raise R1RunnerAbort("action_not_allowed")
 
-    def _runner_close_pull_request(
-        self,
-        pull_number: int,
-        *,
-        after_accepted_unaddressable: bool = False,
-    ) -> R1ControllerReceipt:
+    def _runner_close_pull_request(self, pull_number: int, *, after_accepted_unaddressable: bool = False) -> R1ControllerReceipt:
         number = _validate_pull_number(pull_number)
         expected = ("create_branch", "write_fixture", "create_pull_request")
         if self._action_names != expected:
             raise R1RunnerAbort("action_sequence_invalid")
         if after_accepted_unaddressable:
             first, second, third = self.receipts
-            if (
-                not first.success
-                or not second.success
-                or third.success
-                or third.error_code != "accepted_unaddressable"
-            ):
+            if not first.success or not second.success or third.success or third.error_code != "accepted_unaddressable":
                 raise R1RunnerAbort("action_sequence_invalid")
         elif any(not receipt.success for receipt in self.receipts):
             raise R1RunnerAbort("action_sequence_invalid")
         if self.open_pull_number is None or number != self.open_pull_number:
             raise R1RunnerAbort("action_argument_mismatch")
         self._authorize("close_pull_request")
-        receipt = self._record(
-            "close_pull_request", self._delegate.close_pull_request(number)
-        )
+        receipt = self._record("close_pull_request", self._delegate.close_pull_request(number))
         if receipt.success:
             self.open_pull_number = None
         return receipt
 
 
-def preview_r1(
-    config: R1ExperimentConfig,
-    scenario_definitions: Mapping[str, R1ScenarioDefinition] = R1_SCENARIO_DEFINITIONS,
-) -> dict[str, object]:
+def preview_r1(config: R1ExperimentConfig, scenario_definitions: Mapping[str, R1ScenarioDefinition] = R1_SCENARIO_DEFINITIONS) -> dict[str, object]:
     if not isinstance(config, R1ExperimentConfig):
         raise ValueError("R1 preview requires an R1ExperimentConfig.")
     scenarios: list[dict[str, object]] = []
@@ -406,57 +331,27 @@ def preview_r1(
             raise ValueError("R1 preview is missing a configured scenario.") from exc
         if not isinstance(definition, R1ScenarioDefinition):
             raise ValueError("R1 preview scenario definition is invalid.")
-        scenarios.append(
-            {
-                "scenario_id": scenario_id,
-                "capabilities": list(definition.capabilities),
-                "planned_action_ceiling": len(definition.capabilities),
-                "live_eligible": definition.live_eligible,
-                "second_read": definition.second_read,
-            }
-        )
-    return {
-        "schema_version": "1",
-        "treatment": config.treatment,
-        "scaffold_id": config.scaffold_id,
-        "scaffold_version": config.scaffold_version,
-        "repetitions": config.repetitions,
-        "max_live_actions": config.max_live_actions,
-        "scenarios": scenarios,
-        "artifact_classes": list(_ARTIFACT_CLASSES),
-    }
+        scenarios.append({"scenario_id": scenario_id, "capabilities": list(definition.capabilities), "planned_action_ceiling": len(definition.capabilities), "live_eligible": definition.live_eligible, "second_read": definition.second_read})
+    return {"schema_version": "1", "treatment": config.treatment, "scaffold_id": config.scaffold_id, "scaffold_version": config.scaffold_version, "repetitions": config.repetitions, "max_live_actions": config.max_live_actions, "scenarios": scenarios, "artifact_classes": list(_ARTIFACT_CLASSES)}
 
 
-def _validate_attempt_matrix(
-    config: R1ExperimentConfig, attempts: tuple[R1PreparedAttempt, ...]
-) -> None:
-    if not isinstance(attempts, tuple) or not attempts or not all(
-        isinstance(item, R1PreparedAttempt) for item in attempts
-    ):
+def _validate_attempt_matrix(config: R1ExperimentConfig, attempts: tuple[R1PreparedAttempt, ...]) -> None:
+    if not isinstance(attempts, tuple) or not attempts or not all(isinstance(item, R1PreparedAttempt) for item in attempts):
         raise ValueError("R1 attempts must be a non-empty tuple of prepared attempts.")
-    expected = Counter(
-        scenario_id
-        for scenario_id in config.scenarios
-        for _ in range(config.repetitions)
-    )
+    expected = Counter(scenario_id for scenario_id in config.scenarios for _ in range(config.repetitions))
     actual = Counter(item.task.scenario_id for item in attempts)
     if actual != expected:
         raise ValueError("R1 prepared attempts do not match the configured matrix.")
 
 
-def _last_successful_receipt(
-    receipts: tuple[R1ControllerReceipt, ...] | list[R1ControllerReceipt], action: str
-) -> R1ControllerReceipt | None:
+def _last_successful_receipt(receipts: tuple[R1ControllerReceipt, ...] | list[R1ControllerReceipt], action: str) -> R1ControllerReceipt | None:
     for receipt in reversed(receipts):
         if receipt.action == action and receipt.success:
             return receipt
     return None
 
 
-def _build_contract(
-    attempt: R1PreparedAttempt,
-    receipts: tuple[R1ControllerReceipt, ...] | list[R1ControllerReceipt],
-) -> GitHubPullRequestContract:
+def _build_contract(attempt: R1PreparedAttempt, receipts: tuple[R1ControllerReceipt, ...] | list[R1ControllerReceipt]) -> GitHubPullRequestContract:
     expectation = attempt.expectation
     write = _last_successful_receipt(receipts, "write_fixture")
     pull = _last_successful_receipt(receipts, "create_pull_request")
@@ -469,30 +364,11 @@ def _build_contract(
     base_ref = expectation.expected_base_ref or attempt.task.base_ref
     if head_oid is None or pull_number is None:
         raise R1RunnerAbort("contract_unaddressable")
-    return GitHubPullRequestContract(
-        repository=attempt.target.repository_locator,
-        repository_id=attempt.target.repository_id,
-        pull_number=pull_number,
-        expected_head_oid=head_oid,
-        expected_head_repository_id=attempt.target.repository_id,
-        expected_base_ref=base_ref,
-        expected_state=expectation.expected_state,
-        expected_merge_oid=expectation.expected_merge_oid,
-    )
+    return GitHubPullRequestContract(repository=attempt.target.repository_locator, repository_id=attempt.target.repository_id, pull_number=pull_number, expected_head_oid=head_oid, expected_head_repository_id=attempt.target.repository_id, expected_base_ref=base_ref, expected_state=expectation.expected_state, expected_merge_oid=expectation.expected_merge_oid)
 
 
-def _append_cleanup_receipt(
-    run: R1RunRecord, receipt: R1ControllerReceipt
-) -> R1RunRecord:
-    return R1RunRecord(
-        scenario_id=run.scenario_id,
-        source_claim=run.source_claim,
-        controller_receipts=run.controller_receipts + (receipt,),
-        observations=run.observations,
-        evaluations=run.evaluations,
-        verification_latency_ms=run.verification_latency_ms,
-        abort_reason=run.abort_reason,
-    )
+def _append_cleanup_receipt(run: R1RunRecord, receipt: R1ControllerReceipt) -> R1RunRecord:
+    return R1RunRecord(scenario_id=run.scenario_id, source_claim=run.source_claim, controller_receipts=run.controller_receipts + (receipt,), observations=run.observations, evaluations=run.evaluations, verification_latency_ms=run.verification_latency_ms, abort_reason=run.abort_reason)
 
 
 def _validate_scaffold_result(value: object) -> R1ScaffoldResult:
@@ -501,37 +377,27 @@ def _validate_scaffold_result(value: object) -> R1ScaffoldResult:
     return value
 
 
-def _reconcile_accepted_unaddressable(
-    gated: _GatedR1Controller,
-) -> R1ControllerReceipt | None:
+def _reconcile_accepted_unaddressable(gated: _GatedR1Controller) -> R1ControllerReceipt | None:
     if gated.open_pull_number is not None or not gated.receipts:
         return None
     last = gated.receipts[-1]
-    if (
-        last.action != "create_pull_request"
-        or last.success
-        or last.error_code != "accepted_unaddressable"
-    ):
+    if last.action != "create_pull_request" or last.success or last.error_code != "accepted_unaddressable":
         return None
     reconciler = getattr(gated._delegate, "_reconcile_open_pull_request", None)
     if not callable(reconciler):
         return None
     try:
-        number = reconciler(gated._task.branch_name, gated._task.base_ref)
-        number = _validate_pull_number(number)
+        number = _validate_pull_number(reconciler(gated._task.branch_name, gated._task.base_ref))
     except Exception:
         return None
     gated.open_pull_number = number
     try:
-        return gated._runner_close_pull_request(
-            number, after_accepted_unaddressable=True
-        )
+        return gated._runner_close_pull_request(number, after_accepted_unaddressable=True)
     except Exception:
         return None
 
 
 def _cleanup_once(gated: _GatedR1Controller) -> R1ControllerReceipt | None:
-    """Attempt one runner-owned cleanup without retrying or masking a prior error."""
     if gated.open_pull_number is None:
         return _reconcile_accepted_unaddressable(gated)
     try:
@@ -540,116 +406,43 @@ def _cleanup_once(gated: _GatedR1Controller) -> R1ControllerReceipt | None:
         return None
 
 
-def _aborted_controller_run(
-    *,
-    attempt: R1PreparedAttempt,
-    scaffold_result: R1ScaffoldResult,
-    gated: _GatedR1Controller,
-    source_action_count: int,
-) -> R1RunRecord:
+def _aborted_controller_run(*, attempt: R1PreparedAttempt, scaffold_result: R1ScaffoldResult, gated: _GatedR1Controller, source_action_count: int) -> R1RunRecord:
     _cleanup_once(gated)
-    source_claim = seal_source_claim(
-        completion_claimed=scaffold_result.completion_claimed,
-        retry_count=scaffold_result.retry_count,
-        refusal=scaffold_result.refusal,
-        action_count=source_action_count,
-        private_trace_ref=scaffold_result.private_trace_ref,
-    )
-    return R1RunRecord(
-        scenario_id=attempt.task.scenario_id,
-        source_claim=source_claim,
-        controller_receipts=tuple(gated.receipts),
-        observations=(),
-        evaluations=(),
-        verification_latency_ms=(),
-        abort_reason="controller_failure",
-    )
+    source_claim = seal_source_claim(completion_claimed=scaffold_result.completion_claimed, retry_count=scaffold_result.retry_count, refusal=scaffold_result.refusal, action_count=source_action_count, private_trace_ref=scaffold_result.private_trace_ref)
+    return R1RunRecord(scenario_id=attempt.task.scenario_id, source_claim=source_claim, controller_receipts=tuple(gated.receipts), observations=(), evaluations=(), verification_latency_ms=(), abort_reason="controller_failure")
 
 
-def _execute_attempt(
-    *,
-    attempt: R1PreparedAttempt,
-    config: R1ExperimentConfig,
-    controller: R1Controller,
-    verifier: R1Verifier,
-    scaffold: R1AgentScaffold,
-    permit: R1LivePermit | None,
-) -> R1RunRecord:
+def _execute_attempt(*, attempt: R1PreparedAttempt, config: R1ExperimentConfig, controller: R1Controller, verifier: R1Verifier, scaffold: R1AgentScaffold, permit: R1LivePermit | None) -> R1RunRecord:
     definition = get_r1_scenario(attempt.task.scenario_id)
-    gated = _GatedR1Controller(
-        controller,
-        target=attempt.target,
-        task=attempt.task,
-        definition=definition,
-        max_actions=config.max_live_actions,
-        permit=permit,
-    )
+    gated = _GatedR1Controller(controller, target=attempt.target, task=attempt.task, definition=definition, max_actions=config.max_live_actions, permit=permit)
     try:
         scaffold_result = _validate_scaffold_result(scaffold.run(attempt.task, gated))
     except Exception:
         _cleanup_once(gated)
         raise
-
     source_action_count = len(gated.receipts)
     if any(not receipt.success for receipt in gated.receipts):
-        return _aborted_controller_run(
-            attempt=attempt,
-            scaffold_result=scaffold_result,
-            gated=gated,
-            source_action_count=source_action_count,
-        )
-
+        return _aborted_controller_run(attempt=attempt, scaffold_result=scaffold_result, gated=gated, source_action_count=source_action_count)
     try:
-        source_claim: R1SourceClaim = seal_source_claim(
-            completion_claimed=scaffold_result.completion_claimed,
-            retry_count=scaffold_result.retry_count,
-            refusal=scaffold_result.refusal,
-            action_count=source_action_count,
-            private_trace_ref=scaffold_result.private_trace_ref,
-        )
+        source_claim: R1SourceClaim = seal_source_claim(completion_claimed=scaffold_result.completion_claimed, retry_count=scaffold_result.retry_count, refusal=scaffold_result.refusal, action_count=source_action_count, private_trace_ref=scaffold_result.private_trace_ref)
         contract = _build_contract(attempt, gated.receipts)
-        run = evaluate_attempt(
-            scenario_id=attempt.task.scenario_id,
-            contract=contract,
-            source_claim=source_claim,
-            controller_receipts=tuple(gated.receipts),
-            verifier=verifier,
-        )
+        run = evaluate_attempt(scenario_id=attempt.task.scenario_id, contract=contract, source_claim=source_claim, controller_receipts=tuple(gated.receipts), verifier=verifier)
     except Exception:
         _cleanup_once(gated)
         raise
-
     if gated.open_pull_number is not None:
         cleanup = gated._runner_close_pull_request(gated.open_pull_number)
         if definition.second_read:
-            run = append_explicit_second_observation(
-                run,
-                contract=contract,
-                verifier=verifier,
-                rollback_receipt=cleanup,
-            )
+            run = append_explicit_second_observation(run, contract=contract, verifier=verifier, rollback_receipt=cleanup)
         else:
             run = _append_cleanup_receipt(run, cleanup)
     return run
 
 
-def _automatic_private_literals(
-    config: R1ExperimentConfig,
-    attempts: tuple[R1PreparedAttempt, ...],
-    runs: tuple[R1RunRecord, ...],
-) -> tuple[str, ...]:
+def _automatic_private_literals(config: R1ExperimentConfig, attempts: tuple[R1PreparedAttempt, ...], runs: tuple[R1RunRecord, ...]) -> tuple[str, ...]:
     values: list[str] = [config.experiment_id]
     for item in attempts:
-        values.extend(
-            (
-                item.target.repository_locator,
-                item.task.base_oid,
-                item.task.branch_name,
-                item.task.fixture_path,
-                item.task.fixture_content,
-                item.task.base_ref,
-            )
-        )
+        values.extend((item.target.repository_locator, item.task.base_oid, item.task.branch_name, item.task.fixture_path, item.task.fixture_content, item.task.base_ref))
         if item.expectation.expected_head_oid is not None:
             values.append(item.expectation.expected_head_oid)
         if item.expectation.expected_base_ref is not None:
@@ -667,36 +460,12 @@ def _automatic_private_literals(
     return tuple(dict.fromkeys(value for value in values if len(value) >= 8))
 
 
-def _result(
-    *,
-    config: R1ExperimentConfig,
-    attempts: tuple[R1PreparedAttempt, ...],
-    runs: tuple[R1RunRecord, ...],
-    output_dir: Path,
-    live: bool,
-    forbidden_literals: tuple[str, ...],
-) -> R1ExperimentResult:
+def _result(*, config: R1ExperimentConfig, attempts: tuple[R1PreparedAttempt, ...], runs: tuple[R1RunRecord, ...], output_dir: Path, live: bool, forbidden_literals: tuple[str, ...]) -> R1ExperimentResult:
     metrics = calculate_r1_metrics(runs)
-    effective_forbidden = tuple(
-        dict.fromkeys(
-            forbidden_literals + _automatic_private_literals(config, attempts, runs)
-        )
-    )
-    written = write_r1_artifacts(
-        output_dir,
-        config,
-        runs,
-        metrics,
-        forbidden_literals=effective_forbidden,
-    )
+    effective_forbidden = tuple(dict.fromkeys(forbidden_literals + _automatic_private_literals(config, attempts, runs)))
+    written = write_r1_artifacts(output_dir, config, runs, metrics, forbidden_literals=effective_forbidden)
     verified = verify_r1_manifest(written)
-    return R1ExperimentResult(
-        runs=runs,
-        metrics=metrics,
-        output_dir=written,
-        manifest_verified=verified,
-        live=live,
-    )
+    return R1ExperimentResult(runs=runs, metrics=metrics, output_dir=written, manifest_verified=verified, live=live)
 
 
 def _reserve_live_output(output_dir: Path) -> Path:
@@ -704,10 +473,8 @@ def _reserve_live_output(output_dir: Path) -> Path:
     if path.exists() or path.is_symlink():
         raise R1RunnerAbort("artifact_destination_unsafe")
     for parent in path.parents:
-        if parent.exists():
-            if parent.is_symlink() or not parent.is_dir():
-                raise R1RunnerAbort("artifact_destination_unsafe")
-            break
+        if parent.exists() and (parent.is_symlink() or not parent.is_dir()):
+            raise R1RunnerAbort("artifact_destination_unsafe")
     try:
         path.mkdir(parents=True, exist_ok=False)
         probe = path / ".r1-reservation"
@@ -731,16 +498,7 @@ def _release_empty_reservation(path: Path) -> None:
         pass
 
 
-def run_r1_dry(
-    config: R1ExperimentConfig,
-    controller: R1Controller,
-    verifier: R1Verifier,
-    output_dir: Path,
-    *,
-    attempts: tuple[R1PreparedAttempt, ...],
-    scaffold: R1AgentScaffold,
-    forbidden_literals: tuple[str, ...] = (),
-) -> R1ExperimentResult:
+def run_r1_dry(config: R1ExperimentConfig, controller: R1Controller, verifier: R1Verifier, output_dir: Path, *, attempts: tuple[R1PreparedAttempt, ...], scaffold: R1AgentScaffold, forbidden_literals: tuple[str, ...] = ()) -> R1ExperimentResult:
     if not isinstance(config, R1ExperimentConfig):
         raise ValueError("R1 dry run requires an R1ExperimentConfig.")
     if config.live:
@@ -748,38 +506,11 @@ def run_r1_dry(
     _validate_attempt_matrix(config, attempts)
     if type(controller) is not DryRunR1Controller:
         raise R1RunnerAbort("dry_controller_required")
-    runs = tuple(
-        _execute_attempt(
-            attempt=item,
-            config=config,
-            controller=controller,
-            verifier=verifier,
-            scaffold=scaffold,
-            permit=None,
-        )
-        for item in attempts
-    )
-    return _result(
-        config=config,
-        attempts=attempts,
-        runs=runs,
-        output_dir=Path(output_dir),
-        live=False,
-        forbidden_literals=forbidden_literals,
-    )
+    runs = tuple(_execute_attempt(attempt=item, config=config, controller=controller, verifier=verifier, scaffold=scaffold, permit=None) for item in attempts)
+    return _result(config=config, attempts=attempts, runs=runs, output_dir=Path(output_dir), live=False, forbidden_literals=forbidden_literals)
 
 
-def run_r1_live(
-    config: R1ExperimentConfig,
-    permit: R1LivePermit | None,
-    controller: R1Controller,
-    verifier: R1Verifier,
-    output_dir: Path,
-    *,
-    attempts: tuple[R1PreparedAttempt, ...],
-    scaffold: R1AgentScaffold,
-    forbidden_literals: tuple[str, ...] = (),
-) -> R1ExperimentResult:
+def run_r1_live(config: R1ExperimentConfig, permit: R1LivePermit | None, controller: R1Controller, verifier: R1Verifier, output_dir: Path, *, attempts: tuple[R1PreparedAttempt, ...], scaffold: R1AgentScaffold, forbidden_literals: tuple[str, ...] = ()) -> R1ExperimentResult:
     if not isinstance(config, R1ExperimentConfig):
         raise ValueError("R1 live run requires an R1ExperimentConfig.")
     if not config.live:
@@ -795,11 +526,9 @@ def run_r1_live(
         raise ValueError("One R1 live invocation is bound to exactly one scenario permit.")
     if type(scaffold) is not ScriptedR1Scaffold:
         raise R1RunnerAbort("live_scaffold_untrusted")
-
     definition = get_r1_scenario(config.scenarios[0])
     if not definition.live_eligible:
         raise R1RunnerAbort("scenario_not_live_eligible")
-
     binder = getattr(controller, "is_bound_to", None)
     if not callable(binder):
         raise R1RunnerAbort("controller_target_mismatch")
@@ -813,38 +542,11 @@ def run_r1_live(
             bound = False
         if bound is not True:
             raise R1RunnerAbort("controller_target_mismatch")
-        if not validate_live_permit(
-            permit,
-            scenario_id=item.task.scenario_id,
-            repository_locator=item.target.repository_locator,
-            repository_id=item.target.repository_id,
-            capabilities=item_definition.capabilities,
-            actions_used=0,
-            action_cost=1,
-        ):
+        if not validate_live_permit(permit, scenario_id=item.task.scenario_id, repository_locator=item.target.repository_locator, repository_id=item.target.repository_id, capabilities=item_definition.capabilities, actions_used=0, action_cost=config.max_live_actions):
             raise R1RunnerAbort("live_permit_rejected")
-
     reserved_output = _reserve_live_output(Path(output_dir))
     if not consume_live_permit(permit):
         _release_empty_reservation(reserved_output)
         raise R1RunnerAbort("live_permit_consumed")
-
-    runs = tuple(
-        _execute_attempt(
-            attempt=item,
-            config=config,
-            controller=controller,
-            verifier=verifier,
-            scaffold=scaffold,
-            permit=permit,
-        )
-        for item in attempts
-    )
-    return _result(
-        config=config,
-        attempts=attempts,
-        runs=runs,
-        output_dir=reserved_output,
-        live=True,
-        forbidden_literals=forbidden_literals,
-    )
+    runs = tuple(_execute_attempt(attempt=item, config=config, controller=controller, verifier=verifier, scaffold=scaffold, permit=permit) for item in attempts)
+    return _result(config=config, attempts=attempts, runs=runs, output_dir=reserved_output, live=True, forbidden_literals=forbidden_literals)
