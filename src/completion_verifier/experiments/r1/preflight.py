@@ -298,7 +298,7 @@ def validate_live_permit(
     actions_used: int,
     action_cost: int,
 ) -> bool:
-    if not isinstance(permit, R1LivePermit) or permit._consumed:
+    if not isinstance(permit, R1LivePermit):
         return False
     try:
         locator = _validate_locator(repository_locator)
