@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any
 
 from .models import R1_CONTROLLER_ACTIONS
@@ -47,12 +48,7 @@ def _positive_repository_id(value: object, name: str) -> int:
 
 
 def _validate_locator(value: object) -> str:
-    """Validate a deliberately conservative ASCII GitHub owner/repository locator.
-
-    R1 does not need to support every name the provider might accept. Restricting
-    the live experiment to an unambiguous URL-safe subset removes dot-segment,
-    percent-encoding, query/fragment, whitespace and Unicode-confusable ambiguity.
-    """
+    """Validate a deliberately conservative ASCII GitHub owner/repository locator."""
     if not isinstance(value, str) or not value or value != value.strip():
         raise ValueError("Repository locator must be a non-empty exact string.")
     if value.count("/") != 1 or "\\" in value or "\x00" in value:
@@ -132,14 +128,18 @@ class R1PreflightRequest:
 @dataclass(frozen=True, init=False, repr=False)
 class R1LivePermit:
     _scenario_id: str
+    _repository_locator: str
     _repository_id: int
     _capabilities: tuple[str, ...]
     _max_live_actions: int
+    _consume_lock: Lock
+    _consumed: bool
 
     def __init__(
         self,
         *,
         scenario_id: str,
+        repository_locator: str,
         repository_id: int,
         capabilities: tuple[str, ...],
         max_live_actions: int,
@@ -148,9 +148,12 @@ class R1LivePermit:
         if _key is not _PERMIT_KEY:
             raise ValueError("R1 live permits are issued only by successful preflight.")
         object.__setattr__(self, "_scenario_id", scenario_id)
+        object.__setattr__(self, "_repository_locator", _validate_locator(repository_locator))
         object.__setattr__(self, "_repository_id", repository_id)
         object.__setattr__(self, "_capabilities", tuple(capabilities))
         object.__setattr__(self, "_max_live_actions", max_live_actions)
+        object.__setattr__(self, "_consume_lock", Lock())
+        object.__setattr__(self, "_consumed", False)
 
     def __repr__(self) -> str:
         return "R1LivePermit()"
@@ -276,6 +279,7 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
 
     permit = R1LivePermit(
         scenario_id=request.scenario_id,
+        repository_locator=request.target.repository_locator,
         repository_id=request.target.repository_id,
         capabilities=trusted,
         max_live_actions=request.max_live_actions,
@@ -288,12 +292,17 @@ def validate_live_permit(
     permit: R1LivePermit,
     *,
     scenario_id: str,
+    repository_locator: str,
     repository_id: int,
     capabilities: tuple[str, ...],
     actions_used: int,
     action_cost: int,
 ) -> bool:
-    if not isinstance(permit, R1LivePermit):
+    if not isinstance(permit, R1LivePermit) or permit._consumed:
+        return False
+    try:
+        locator = _validate_locator(repository_locator)
+    except ValueError:
         return False
     if isinstance(repository_id, bool) or not isinstance(repository_id, int):
         return False
@@ -305,7 +314,19 @@ def validate_live_permit(
         return False
     return (
         scenario_id == permit._scenario_id
+        and locator == permit._repository_locator
         and repository_id == permit._repository_id
         and capabilities == permit._capabilities
         and actions_used + action_cost <= permit._max_live_actions
     )
+
+
+def consume_live_permit(permit: R1LivePermit) -> bool:
+    """Atomically consume one permit. A live permit authorizes exactly one invocation."""
+    if not isinstance(permit, R1LivePermit):
+        return False
+    with permit._consume_lock:
+        if permit._consumed:
+            return False
+        object.__setattr__(permit, "_consumed", True)
+        return True
