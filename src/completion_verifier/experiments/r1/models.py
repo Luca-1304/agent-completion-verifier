@@ -12,24 +12,12 @@ from ...remote.models import RemoteObservation
 R1_SCENARIOS = ("S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8")
 R1_TREATMENTS = ("baseline", "evidence_contract", "verifier_feedback")
 R1_CONTROLLER_ACTIONS = (
-    "create_branch",
-    "write_fixture",
-    "create_pull_request",
-    "close_pull_request",
+    "create_branch", "write_fixture", "create_pull_request", "close_pull_request",
 )
 R1_CONTROLLER_ERROR_CODES = (
-    "provider_rejected",
-    "invalid_request",
-    "action_not_allowed",
-    "action_budget_exceeded",
-    "provider_unavailable",
-    "authentication_failed",
-    "permission_unverified",
-    "rate_limited",
-    "resource_conflict",
-    "validation_failed",
-    "redirect_rejected",
-    "invalid_provider_response",
+    "provider_rejected", "invalid_request", "action_not_allowed", "action_budget_exceeded",
+    "provider_unavailable", "authentication_failed", "permission_unverified", "rate_limited",
+    "resource_conflict", "validation_failed", "redirect_rejected", "invalid_provider_response",
 )
 _PRIVATE_OID_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 
@@ -87,11 +75,7 @@ class R1ExperimentConfig:
             raise ValueError("Unknown R1 treatment.")
         object.__setattr__(self, "scaffold_id", _text(self.scaffold_id, "scaffold_id"))
         object.__setattr__(self, "scaffold_version", _text(self.scaffold_version, "scaffold_version"))
-        if (
-            isinstance(self.max_live_actions, bool)
-            or not isinstance(self.max_live_actions, int)
-            or self.max_live_actions <= 0
-        ):
+        if isinstance(self.max_live_actions, bool) or not isinstance(self.max_live_actions, int) or self.max_live_actions <= 0:
             raise ValueError("'max_live_actions' must be a positive integer.")
         if not isinstance(self.live, bool):
             raise ValueError("'live' must be boolean.")
@@ -103,15 +87,11 @@ class R1ExperimentConfig:
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": self.schema_version,
-            "seed": self.seed,
-            "repetitions": self.repetitions,
-            "scenarios": list(self.scenarios),
-            "treatment": self.treatment,
-            "scaffold_id": self.scaffold_id,
+            "schema_version": self.schema_version, "seed": self.seed,
+            "repetitions": self.repetitions, "scenarios": list(self.scenarios),
+            "treatment": self.treatment, "scaffold_id": self.scaffold_id,
             "scaffold_version": self.scaffold_version,
-            "max_live_actions": self.max_live_actions,
-            "live": self.live,
+            "max_live_actions": self.max_live_actions, "live": self.live,
         }
 
 
@@ -125,32 +105,19 @@ class R1SourceClaim:
     schema_version: str = "1"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.completion_claimed, bool):
-            raise ValueError("'completion_claimed' must be boolean.")
+        if not isinstance(self.completion_claimed, bool): raise ValueError("'completion_claimed' must be boolean.")
         object.__setattr__(self, "retry_count", _nonnegative_int(self.retry_count, "retry_count"))
-        if not isinstance(self.refusal, bool):
-            raise ValueError("'refusal' must be boolean.")
+        if not isinstance(self.refusal, bool): raise ValueError("'refusal' must be boolean.")
         object.__setattr__(self, "action_count", _nonnegative_int(self.action_count, "action_count"))
         if self.private_trace_ref is not None:
-            object.__setattr__(
-                self,
-                "private_trace_ref",
-                _text(self.private_trace_ref, "private_trace_ref"),
-            )
-        if self.schema_version != "1":
-            raise ValueError("Unsupported R1 source-claim schema version.")
+            object.__setattr__(self, "private_trace_ref", _text(self.private_trace_ref, "private_trace_ref"))
+        if self.schema_version != "1": raise ValueError("Unsupported R1 source-claim schema version.")
 
-    def __repr__(self) -> str:
-        return "R1SourceClaim()"
+    def __repr__(self) -> str: return "R1SourceClaim()"
 
     def to_public_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "completion_claimed": self.completion_claimed,
-            "retry_count": self.retry_count,
-            "refusal": self.refusal,
-            "action_count": self.action_count,
-        }
+        return {"schema_version": self.schema_version, "completion_claimed": self.completion_claimed,
+                "retry_count": self.retry_count, "refusal": self.refusal, "action_count": self.action_count}
 
 
 @dataclass(frozen=True, repr=False)
@@ -165,10 +132,8 @@ class R1ControllerReceipt:
     schema_version: str = "1"
 
     def __post_init__(self) -> None:
-        if self.action not in R1_CONTROLLER_ACTIONS:
-            raise ValueError("Unsupported R1 controller action.")
-        if not isinstance(self.success, bool):
-            raise ValueError("'success' must be boolean.")
+        if self.action not in R1_CONTROLLER_ACTIONS: raise ValueError("Unsupported R1 controller action.")
+        if not isinstance(self.success, bool): raise ValueError("'success' must be boolean.")
         if isinstance(self.action_cost, bool) or not isinstance(self.action_cost, int) or self.action_cost <= 0:
             raise ValueError("'action_cost' must be a positive integer.")
         if self.error_code is not None and self.error_code not in R1_CONTROLLER_ERROR_CODES:
@@ -176,45 +141,23 @@ class R1ControllerReceipt:
         if self.success and self.error_code is not None:
             raise ValueError("Successful controller receipts cannot contain an error code.")
         if self.private_target_ref is not None:
-            object.__setattr__(
-                self,
-                "private_target_ref",
-                _text(self.private_target_ref, "private_target_ref"),
-            )
+            object.__setattr__(self, "private_target_ref", _text(self.private_target_ref, "private_target_ref"))
         if self.private_object_oid is not None:
-            object.__setattr__(
-                self,
-                "private_object_oid",
-                _private_oid(self.private_object_oid, "private_object_oid"),
-            )
+            object.__setattr__(self, "private_object_oid", _private_oid(self.private_object_oid, "private_object_oid"))
         if self.private_pull_number is not None:
-            object.__setattr__(
-                self,
-                "private_pull_number",
-                _positive_int(self.private_pull_number, "private_pull_number"),
-            )
-        if not self.success and (
-            self.private_object_oid is not None or self.private_pull_number is not None
-        ):
+            object.__setattr__(self, "private_pull_number", _positive_int(self.private_pull_number, "private_pull_number"))
+        if not self.success and (self.private_object_oid is not None or self.private_pull_number is not None):
             raise ValueError("Failed controller receipts cannot retain provider object identifiers.")
-        if self.schema_version != "1":
-            raise ValueError("Unsupported R1 controller-receipt schema version.")
+        if self.schema_version != "1": raise ValueError("Unsupported R1 controller-receipt schema version.")
 
-    def __repr__(self) -> str:
-        return "R1ControllerReceipt()"
+    def __repr__(self) -> str: return "R1ControllerReceipt()"
 
     @property
-    def public(self) -> "R1ControllerReceipt":
-        return self
+    def public(self) -> "R1ControllerReceipt": return self
 
     def to_public_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "action": self.action,
-            "success": self.success,
-            "action_cost": self.action_cost,
-            "error_code": self.error_code,
-        }
+        return {"schema_version": self.schema_version, "action": self.action, "success": self.success,
+                "action_cost": self.action_cost, "error_code": self.error_code}
 
 
 @dataclass(frozen=True, repr=False)
@@ -228,63 +171,45 @@ class R1RunRecord:
     schema_version: str = "1"
 
     def __post_init__(self) -> None:
-        if self.scenario_id not in R1_SCENARIOS:
-            raise ValueError("Unknown R1 scenario.")
-        if not isinstance(self.source_claim, R1SourceClaim):
-            raise ValueError("R1 run record requires a sealed source claim.")
-        if not isinstance(self.controller_receipts, tuple) or not all(
-            isinstance(item, R1ControllerReceipt) for item in self.controller_receipts
-        ):
+        if self.scenario_id not in R1_SCENARIOS: raise ValueError("Unknown R1 scenario.")
+        if not isinstance(self.source_claim, R1SourceClaim): raise ValueError("R1 run record requires a sealed source claim.")
+        if not isinstance(self.controller_receipts, tuple) or not all(isinstance(item, R1ControllerReceipt) for item in self.controller_receipts):
             raise ValueError("R1 run record controller receipts are invalid.")
-        if not isinstance(self.observations, tuple) or not self.observations or not all(
-            isinstance(item, RemoteObservation) for item in self.observations
-        ):
+        if not isinstance(self.observations, tuple) or not all(isinstance(item, RemoteObservation) for item in self.observations):
             raise ValueError("R1 run record observations are invalid.")
-        if not isinstance(self.evaluations, tuple) or not self.evaluations or not all(
-            isinstance(item, Evaluation) for item in self.evaluations
-        ):
+        if not isinstance(self.evaluations, tuple) or not all(isinstance(item, Evaluation) for item in self.evaluations):
             raise ValueError("R1 run record evaluations are invalid.")
         if len(self.observations) != len(self.evaluations):
             raise ValueError("R1 observations and evaluations must remain one-to-one.")
         latencies = self.verification_latency_ms
-        if not isinstance(latencies, tuple):
-            raise ValueError("R1 verification latencies must be a tuple.")
-        if not latencies:
+        if not isinstance(latencies, tuple): raise ValueError("R1 verification latencies must be a tuple.")
+        if not latencies and self.observations:
             latencies = tuple(None for _ in self.observations)
             object.__setattr__(self, "verification_latency_ms", latencies)
         if len(latencies) != len(self.observations):
             raise ValueError("R1 verification latencies must align with observations.")
         for value in latencies:
-            if value is None:
-                continue
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(float(value))
-                or float(value) < 0
-            ):
+            if value is None: continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or float(value) < 0:
                 raise ValueError("R1 verification latency must be finite and non-negative.")
-        if self.schema_version != "1":
-            raise ValueError("Unsupported R1 run-record schema version.")
+        if self.schema_version != "1": raise ValueError("Unsupported R1 run-record schema version.")
 
-    def __repr__(self) -> str:
-        return "R1RunRecord()"
+    def __repr__(self) -> str: return "R1RunRecord()"
 
     @property
-    def evaluation(self) -> Evaluation:
-        return self.evaluations[-1]
+    def evaluation(self) -> Evaluation | None:
+        return self.evaluations[-1] if self.evaluations else None
 
     def to_public_dict(self) -> dict[str, Any]:
+        latest = self.evaluation
         return {
             "schema_version": self.schema_version,
             "scenario_id": self.scenario_id,
             "source_claim": self.source_claim.to_public_dict(),
-            "controller_receipts": [
-                receipt.to_public_dict() for receipt in self.controller_receipts
-            ],
+            "controller_receipts": [receipt.to_public_dict() for receipt in self.controller_receipts],
             "observations": [observation.to_dict() for observation in self.observations],
             "remote_outcomes": [observation.outcome.value for observation in self.observations],
             "evaluations": [evaluation.to_dict() for evaluation in self.evaluations],
-            "evaluation": self.evaluation.to_dict(),
+            "evaluation": None if latest is None else latest.to_dict(),
             "verification_latency_ms": list(self.verification_latency_ms),
         }
