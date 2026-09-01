@@ -164,7 +164,7 @@ def write_r1_artifacts(
 def verify_r1_manifest(output_dir: Path) -> bool:
     output_dir = Path(output_dir)
     manifest_path = output_dir / "manifest.json"
-    if not manifest_path.is_file():
+    if not manifest_path.is_file() or manifest_path.is_symlink():
         raise ValueError("R1 manifest is missing.")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -178,18 +178,30 @@ def verify_r1_manifest(output_dir: Path) -> bool:
     if not isinstance(files, dict) or set(files) != set(_R1_ARTIFACT_FILES):
         raise ValueError("R1 manifest file mapping is invalid.")
 
-    actual_files = {
-        path.name for path in output_dir.iterdir() if path.is_file()
-    }
+    entries = tuple(output_dir.iterdir())
     expected_files = set(_R1_ARTIFACT_FILES) | {"manifest.json"}
-    if actual_files != expected_files:
+    if {path.name for path in entries} != expected_files:
         raise ValueError("R1 artifact directory contains missing or untracked files.")
+    if any(path.is_symlink() or not path.is_file() for path in entries):
+        raise ValueError("R1 artifact directory contains untracked non-file content.")
+
+    config_digest = manifest.get("public_config_digest")
+    if not isinstance(config_digest, str) or len(config_digest) != 64:
+        raise ValueError("R1 public config digest is invalid.")
+    try:
+        public_config = json.loads((output_dir / "config.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("R1 public config is invalid.") from exc
+    if not isinstance(public_config, dict):
+        raise ValueError("R1 public config is invalid.")
+    if canonical_json_sha256(public_config) != config_digest:
+        raise ValueError("R1 public config digest mismatch.")
 
     for name in _R1_ARTIFACT_FILES:
         expected = files.get(name)
         if not isinstance(expected, str) or len(expected) != 64:
             raise ValueError("R1 manifest digest is invalid.")
         path = output_dir / name
-        if not path.is_file() or file_sha256(path) != expected:
+        if path.is_symlink() or not path.is_file() or file_sha256(path) != expected:
             raise ValueError("R1 manifest digest mismatch.")
     return True
