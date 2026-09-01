@@ -31,6 +31,10 @@ R1_CONTROLLER_ERROR_CODES = (
     "redirect_rejected",
     "invalid_provider_response",
 )
+R1_RUN_ABORT_REASONS = (
+    "controller_failed_before_verification",
+    "accepted_mutation_unaddressable",
+)
 _PRIVATE_OID_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 
 
@@ -225,6 +229,7 @@ class R1RunRecord:
     observations: tuple[RemoteObservation, ...]
     evaluations: tuple[Evaluation, ...]
     verification_latency_ms: tuple[float | None, ...] = ()
+    abort_reason: str | None = None
     schema_version: str = "1"
 
     def __post_init__(self) -> None:
@@ -236,24 +241,35 @@ class R1RunRecord:
             isinstance(item, R1ControllerReceipt) for item in self.controller_receipts
         ):
             raise ValueError("R1 run record controller receipts are invalid.")
-        if not isinstance(self.observations, tuple) or not self.observations or not all(
+        if not isinstance(self.observations, tuple) or not all(
             isinstance(item, RemoteObservation) for item in self.observations
         ):
             raise ValueError("R1 run record observations are invalid.")
-        if not isinstance(self.evaluations, tuple) or not self.evaluations or not all(
+        if not isinstance(self.evaluations, tuple) or not all(
             isinstance(item, Evaluation) for item in self.evaluations
         ):
             raise ValueError("R1 run record evaluations are invalid.")
         if len(self.observations) != len(self.evaluations):
             raise ValueError("R1 observations and evaluations must remain one-to-one.")
+        if self.abort_reason is not None and self.abort_reason not in R1_RUN_ABORT_REASONS:
+            raise ValueError("Unknown R1 run abort reason.")
+        if self.abort_reason is None and not self.observations:
+            raise ValueError("Observed R1 runs require at least one remote observation.")
+        if self.abort_reason is not None and (self.observations or self.evaluations):
+            raise ValueError("Aborted R1 runs cannot contain remote observations or evaluations.")
+
         latencies = self.verification_latency_ms
         if not isinstance(latencies, tuple):
             raise ValueError("R1 verification latencies must be a tuple.")
-        if not latencies:
-            latencies = tuple(None for _ in self.observations)
-            object.__setattr__(self, "verification_latency_ms", latencies)
-        if len(latencies) != len(self.observations):
-            raise ValueError("R1 verification latencies must align with observations.")
+        if self.abort_reason is not None:
+            if latencies:
+                raise ValueError("Aborted R1 runs cannot contain verification latency samples.")
+        else:
+            if not latencies:
+                latencies = tuple(None for _ in self.observations)
+                object.__setattr__(self, "verification_latency_ms", latencies)
+            if len(latencies) != len(self.observations):
+                raise ValueError("R1 verification latencies must align with observations.")
         for value in latencies:
             if value is None:
                 continue
@@ -271,10 +287,11 @@ class R1RunRecord:
         return "R1RunRecord()"
 
     @property
-    def evaluation(self) -> Evaluation:
-        return self.evaluations[-1]
+    def evaluation(self) -> Evaluation | None:
+        return self.evaluations[-1] if self.evaluations else None
 
     def to_public_dict(self) -> dict[str, Any]:
+        latest_evaluation = self.evaluation
         return {
             "schema_version": self.schema_version,
             "scenario_id": self.scenario_id,
@@ -285,6 +302,7 @@ class R1RunRecord:
             "observations": [observation.to_dict() for observation in self.observations],
             "remote_outcomes": [observation.outcome.value for observation in self.observations],
             "evaluations": [evaluation.to_dict() for evaluation in self.evaluations],
-            "evaluation": self.evaluation.to_dict(),
+            "evaluation": None if latest_evaluation is None else latest_evaluation.to_dict(),
             "verification_latency_ms": list(self.verification_latency_ms),
+            "abort_reason": self.abort_reason,
         }
