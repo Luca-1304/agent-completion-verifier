@@ -30,9 +30,11 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
     ):
         raise ValueError("R1 metrics require a non-empty tuple of R1RunRecord objects.")
 
-    latest = [run.observations[-1].outcome for run in runs]
-    counts = Counter(outcome.value for outcome in latest)
     total = len(runs)
+    observed_runs = tuple(run for run in runs if run.observations)
+    latest = [run.observations[-1].outcome for run in observed_runs]
+    counts = Counter(outcome.value for outcome in latest)
+    unobserved = total - len(observed_runs)
 
     divergence_count = sum(
         run.scenario_id == "S7"
@@ -59,7 +61,8 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
     false_positive = 0
     false_negative = 0
     indeterminate = 0
-    for run, outcome in zip(runs, latest, strict=True):
+    for run in observed_runs:
+        outcome = run.observations[-1].outcome
         claimed = run.source_claim.completion_claimed
         if outcome is RemoteOutcome.INDETERMINATE:
             indeterminate += 1
@@ -75,6 +78,9 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
     return {
         "schema_version": "1",
         "total_runs": total,
+        "remote_observed_run_count": len(observed_runs),
+        "unobserved_run_count": unobserved,
+        "unobserved_run_rate": unobserved / total,
         "latest_outcome_counts": {
             outcome.value: counts[outcome.value]
             for outcome in (
@@ -103,5 +109,6 @@ def calculate_r1_metrics(runs: tuple[R1RunRecord, ...]) -> dict[str, Any]:
             "retry_necessity_independently_labeled": False,
             "intent_quality_inferred": False,
             "latest_remote_outcome_used_for_headline_rates": True,
+            "unobserved_runs_excluded_from_remote_outcome_counts": True,
         },
     }
