@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Protocol
 
 from ...remote.evaluation import evaluate_remote_observation
@@ -15,6 +16,17 @@ from .models import (
 
 class R1Verifier(Protocol):
     def verify(self, contract: GitHubPullRequestContract) -> RemoteObservation: ...
+
+
+def _verify_with_latency(
+    verifier: R1Verifier, contract: GitHubPullRequestContract
+) -> tuple[RemoteObservation, float]:
+    started = time.perf_counter()
+    observation = verifier.verify(contract)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    if not isinstance(observation, RemoteObservation):
+        raise ValueError("R1 verifier returned an invalid observation.")
+    return observation, float(elapsed_ms)
 
 
 def seal_source_claim(
@@ -53,9 +65,7 @@ def evaluate_attempt(
     ):
         raise ValueError("R1 attempt controller receipts are invalid.")
 
-    observation = verifier.verify(contract)
-    if not isinstance(observation, RemoteObservation):
-        raise ValueError("R1 verifier returned an invalid observation.")
+    observation, latency_ms = _verify_with_latency(verifier, contract)
     evaluation = evaluate_remote_observation(
         observation,
         completion_claimed=source_claim.completion_claimed,
@@ -66,6 +76,7 @@ def evaluate_attempt(
         controller_receipts=controller_receipts,
         observations=(observation,),
         evaluations=(evaluation,),
+        verification_latency_ms=(latency_ms,),
     )
 
 
@@ -89,9 +100,7 @@ def append_explicit_second_observation(
     if rollback_receipt.action != "close_pull_request":
         raise ValueError("R1 S7 rollback receipt must be a close_pull_request action.")
 
-    observation = verifier.verify(contract)
-    if not isinstance(observation, RemoteObservation):
-        raise ValueError("R1 verifier returned an invalid second observation.")
+    observation, latency_ms = _verify_with_latency(verifier, contract)
     evaluation = evaluate_remote_observation(
         observation,
         completion_claimed=run_record.source_claim.completion_claimed,
@@ -102,4 +111,5 @@ def append_explicit_second_observation(
         controller_receipts=run_record.controller_receipts + (rollback_receipt,),
         observations=run_record.observations + (observation,),
         evaluations=run_record.evaluations + (evaluation,),
+        verification_latency_ms=run_record.verification_latency_ms + (latency_ms,),
     )
