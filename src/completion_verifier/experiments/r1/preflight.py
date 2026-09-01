@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .models import R1_CONTROLLER_ACTIONS
@@ -30,6 +32,7 @@ _PREFLIGHT_REASONS = frozenset(
     }
 )
 _PERMIT_KEY = object()
+_PERMIT_LOCK = threading.Lock()
 _OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9])?$")
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
@@ -75,6 +78,16 @@ def _validate_capabilities(value: object, name: str) -> tuple[str, ...]:
     if any(not isinstance(item, str) for item in value):
         raise ValueError(f"'{name}' must contain strings.")
     return value
+
+
+def _canonical_output_destination(value: object) -> tuple[Path, str]:
+    if not isinstance(value, (str, Path)):
+        raise ValueError("R1 artifact destination must be a path.")
+    path = Path(value)
+    if not str(path):
+        raise ValueError("R1 artifact destination must be non-empty.")
+    canonical = path.resolve(strict=False)
+    return canonical, str(canonical)
 
 
 @dataclass(frozen=True, repr=False)
@@ -132,14 +145,18 @@ class R1PreflightRequest:
 @dataclass(frozen=True, init=False, repr=False)
 class R1LivePermit:
     _scenario_id: str
+    _repository_locator: str
     _repository_id: int
     _capabilities: tuple[str, ...]
     _max_live_actions: int
+    _consumed: bool
+    _artifact_destination: str | None
 
     def __init__(
         self,
         *,
         scenario_id: str,
+        repository_locator: str,
         repository_id: int,
         capabilities: tuple[str, ...],
         max_live_actions: int,
@@ -148,9 +165,12 @@ class R1LivePermit:
         if _key is not _PERMIT_KEY:
             raise ValueError("R1 live permits are issued only by successful preflight.")
         object.__setattr__(self, "_scenario_id", scenario_id)
+        object.__setattr__(self, "_repository_locator", _validate_locator(repository_locator))
         object.__setattr__(self, "_repository_id", repository_id)
         object.__setattr__(self, "_capabilities", tuple(capabilities))
         object.__setattr__(self, "_max_live_actions", max_live_actions)
+        object.__setattr__(self, "_consumed", False)
+        object.__setattr__(self, "_artifact_destination", None)
 
     def __repr__(self) -> str:
         return "R1LivePermit()"
@@ -276,6 +296,7 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
 
     permit = R1LivePermit(
         scenario_id=request.scenario_id,
+        repository_locator=request.target.repository_locator,
         repository_id=request.target.repository_id,
         capabilities=trusted,
         max_live_actions=request.max_live_actions,
@@ -288,12 +309,17 @@ def validate_live_permit(
     permit: R1LivePermit,
     *,
     scenario_id: str,
+    repository_locator: str,
     repository_id: int,
     capabilities: tuple[str, ...],
     actions_used: int,
     action_cost: int,
 ) -> bool:
     if not isinstance(permit, R1LivePermit):
+        return False
+    try:
+        locator = _validate_locator(repository_locator)
+    except ValueError:
         return False
     if isinstance(repository_id, bool) or not isinstance(repository_id, int):
         return False
@@ -305,7 +331,52 @@ def validate_live_permit(
         return False
     return (
         scenario_id == permit._scenario_id
+        and locator == permit._repository_locator
         and repository_id == permit._repository_id
         and capabilities == permit._capabilities
         and actions_used + action_cost <= permit._max_live_actions
     )
+
+
+def consume_live_permit(
+    permit: R1LivePermit,
+    *,
+    scenario_id: str,
+    repository_locator: str,
+    repository_id: int,
+    capabilities: tuple[str, ...],
+    artifact_destination: str | Path,
+) -> bool:
+    """Atomically bind a successful preflight permit to one live invocation.
+
+    The real artifact directory is reserved before any provider mutation. A
+    consumed permit stays valid for the gated actions in that invocation but
+    cannot authorize another invocation.
+    """
+    if not validate_live_permit(
+        permit,
+        scenario_id=scenario_id,
+        repository_locator=repository_locator,
+        repository_id=repository_id,
+        capabilities=capabilities,
+        actions_used=0,
+        action_cost=1,
+    ):
+        return False
+    try:
+        path, canonical = _canonical_output_destination(artifact_destination)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+    with _PERMIT_LOCK:
+        if permit._consumed:
+            return False
+        if path.exists():
+            return False
+        try:
+            path.mkdir(parents=True, exist_ok=False)
+        except OSError:
+            return False
+        object.__setattr__(permit, "_artifact_destination", canonical)
+        object.__setattr__(permit, "_consumed", True)
+        return True
