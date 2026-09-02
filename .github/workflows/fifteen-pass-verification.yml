@@ -1,6 +1,6 @@
 name: Fifteen consecutive verification passes
 
-# R1 final verification trigger: comment-only change; no workflow semantics changed.
+# R1 post-merge hardening verification trigger: comment-only change; no workflow semantics changed.
 on:
   pull_request:
     paths:

@@ -1,3 +1,4 @@
+<!-- R1 post-merge hardening verification trigger: comment-only; documentation semantics unchanged. -->
 # Optional OpenAI Responses sandbox runner
 
 Version 0.6 adds an optional bridge from the deterministic verifier to a real OpenAI Responses API model operating under the existing confined file-write contract.
