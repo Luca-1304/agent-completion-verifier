@@ -365,7 +365,7 @@ class _GatedR1Controller:
             self.open_pull_number = receipt.private_pull_number
         return receipt
 
-    def close_pull_request(self, pull_number: int) -> R1ControllerReceipt:
+    def _close_tracked_pull_request(self, pull_number: int) -> R1ControllerReceipt:
         self._require_sequence(("create_branch", "write_fixture", "create_pull_request"))
         try:
             number = _validate_pull_number(pull_number)
@@ -380,6 +380,13 @@ class _GatedR1Controller:
         if receipt.success:
             self.open_pull_number = None
         return receipt
+
+    def close_pull_request(self, pull_number: int) -> R1ControllerReceipt:
+        # S7's close is the experiment intervention. Keeping it runner-owned
+        # guarantees the second independent read cannot be skipped by a scaffold.
+        if self._definition.second_read:
+            raise R1RunnerAbort("action_not_allowed")
+        return self._close_tracked_pull_request(pull_number)
 
 
 def preview_r1(
@@ -481,6 +488,8 @@ def _append_cleanup_receipt(
         observations=run.observations,
         evaluations=run.evaluations,
         verification_latency_ms=run.verification_latency_ms,
+        run_status=run.run_status,
+        abort_reason_code=run.abort_reason_code,
     )
 
 
@@ -496,7 +505,7 @@ def _cleanup_once(gated: _GatedR1Controller) -> R1ControllerReceipt | None:
     if number is None:
         return None
     try:
-        return gated.close_pull_request(number)
+        return gated._close_tracked_pull_request(number)
     except Exception:
         return None
 
@@ -525,14 +534,31 @@ def _execute_attempt(
         _cleanup_once(gated)
         raise
 
-    try:
-        source_claim: R1SourceClaim = seal_source_claim(
-            completion_claimed=scaffold_result.completion_claimed,
-            retry_count=scaffold_result.retry_count,
-            refusal=scaffold_result.refusal,
-            action_count=len(gated.receipts),
-            private_trace_ref=scaffold_result.private_trace_ref,
+    source_claim: R1SourceClaim = seal_source_claim(
+        completion_claimed=scaffold_result.completion_claimed,
+        retry_count=scaffold_result.retry_count,
+        refusal=scaffold_result.refusal,
+        action_count=len(gated.receipts),
+        private_trace_ref=scaffold_result.private_trace_ref,
+    )
+
+    # A provider/controller failure is experiment data, not remote evidence. If
+    # the verifier cannot be addressed, preserve the receipts and record that
+    # the attempt ended before independent observation rather than fabricating
+    # an INDETERMINATE GitHub result.
+    if any(not receipt.success for receipt in gated.receipts):
+        _cleanup_once(gated)
+        return R1RunRecord(
+            scenario_id=attempt.task.scenario_id,
+            source_claim=source_claim,
+            controller_receipts=tuple(gated.receipts),
+            observations=(),
+            evaluations=(),
+            run_status="preverification_aborted",
+            abort_reason_code="controller_failure",
         )
+
+    try:
         contract = _build_contract(attempt, gated.receipts)
         run = evaluate_attempt(
             scenario_id=attempt.task.scenario_id,
@@ -546,7 +572,7 @@ def _execute_attempt(
         raise
 
     if gated.open_pull_number is not None:
-        cleanup = gated.close_pull_request(gated.open_pull_number)
+        cleanup = gated._close_tracked_pull_request(gated.open_pull_number)
         if definition.second_read:
             run = append_explicit_second_observation(
                 run,
