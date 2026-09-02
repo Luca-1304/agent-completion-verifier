@@ -31,6 +31,8 @@ R1_CONTROLLER_ERROR_CODES = (
     "redirect_rejected",
     "invalid_provider_response",
 )
+R1_RUN_STATUSES = ("observed", "preverification_aborted")
+R1_ABORT_REASON_CODES = ("controller_failure", "contract_unaddressable")
 _PRIVATE_OID_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 
 
@@ -225,6 +227,8 @@ class R1RunRecord:
     observations: tuple[RemoteObservation, ...]
     evaluations: tuple[Evaluation, ...]
     verification_latency_ms: tuple[float | None, ...] = ()
+    run_status: str = "observed"
+    abort_reason_code: str | None = None
     schema_version: str = "1"
 
     def __post_init__(self) -> None:
@@ -236,16 +240,26 @@ class R1RunRecord:
             isinstance(item, R1ControllerReceipt) for item in self.controller_receipts
         ):
             raise ValueError("R1 run record controller receipts are invalid.")
-        if not isinstance(self.observations, tuple) or not self.observations or not all(
+        if self.run_status not in R1_RUN_STATUSES:
+            raise ValueError("Unknown R1 run status.")
+        if self.abort_reason_code is not None and self.abort_reason_code not in R1_ABORT_REASON_CODES:
+            raise ValueError("Unknown R1 abort reason code.")
+        if not isinstance(self.observations, tuple) or not all(
             isinstance(item, RemoteObservation) for item in self.observations
         ):
             raise ValueError("R1 run record observations are invalid.")
-        if not isinstance(self.evaluations, tuple) or not self.evaluations or not all(
+        if not isinstance(self.evaluations, tuple) or not all(
             isinstance(item, Evaluation) for item in self.evaluations
         ):
             raise ValueError("R1 run record evaluations are invalid.")
         if len(self.observations) != len(self.evaluations):
             raise ValueError("R1 observations and evaluations must remain one-to-one.")
+        if self.run_status == "observed":
+            if not self.observations or self.abort_reason_code is not None:
+                raise ValueError("Observed R1 runs require remote evidence and no abort reason.")
+        else:
+            if self.observations or self.evaluations or self.abort_reason_code is None:
+                raise ValueError("Preverification-aborted R1 runs cannot contain remote evidence.")
         latencies = self.verification_latency_ms
         if not isinstance(latencies, tuple):
             raise ValueError("R1 verification latencies must be a tuple.")
@@ -271,20 +285,23 @@ class R1RunRecord:
         return "R1RunRecord()"
 
     @property
-    def evaluation(self) -> Evaluation:
-        return self.evaluations[-1]
+    def evaluation(self) -> Evaluation | None:
+        return self.evaluations[-1] if self.evaluations else None
 
     def to_public_dict(self) -> dict[str, Any]:
+        evaluation = self.evaluation
         return {
             "schema_version": self.schema_version,
             "scenario_id": self.scenario_id,
+            "run_status": self.run_status,
+            "abort_reason_code": self.abort_reason_code,
             "source_claim": self.source_claim.to_public_dict(),
             "controller_receipts": [
                 receipt.to_public_dict() for receipt in self.controller_receipts
             ],
             "observations": [observation.to_dict() for observation in self.observations],
             "remote_outcomes": [observation.outcome.value for observation in self.observations],
-            "evaluations": [evaluation.to_dict() for evaluation in self.evaluations],
-            "evaluation": self.evaluation.to_dict(),
+            "evaluations": [item.to_dict() for item in self.evaluations],
+            "evaluation": None if evaluation is None else evaluation.to_dict(),
             "verification_latency_ms": list(self.verification_latency_ms),
         }
