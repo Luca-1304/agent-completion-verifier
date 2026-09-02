@@ -30,6 +30,7 @@ R1_CONTROLLER_ERROR_CODES = (
     "validation_failed",
     "redirect_rejected",
     "invalid_provider_response",
+    "accepted_unaddressable",
 )
 R1_RUN_STATUSES = ("observed", "preverification_aborted")
 R1_ABORT_REASON_CODES = ("controller_failure", "contract_unaddressable")
