@@ -245,8 +245,8 @@ class R1AdversarialReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(R1RunnerAbort) as raised:
                 run_r1_live(
-                    _config(max_actions=5),
-                    _permit(max_actions=5),
+                    _config(),
+                    _permit(),
                     controller,
                     MatchVerifier(),
                     Path(tmp) / "out",
@@ -262,8 +262,8 @@ class R1AdversarialReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(R1RunnerAbort) as raised:
                 run_r1_live(
-                    _config(max_actions=5),
-                    _permit(max_actions=5),
+                    _config(),
+                    _permit(),
                     controller,
                     MatchVerifier(),
                     Path(tmp) / "out",
