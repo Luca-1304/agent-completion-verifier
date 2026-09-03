@@ -44,6 +44,14 @@ credentials.*.json
 secrets.txt
 secrets.json
 
+# Internal-only working material
+internal/
+private/
+operator/
+research_private/
+*.private.json
+*.private.md
+
 # Private or live execution artifacts
 private_runs/
 live_runs/
