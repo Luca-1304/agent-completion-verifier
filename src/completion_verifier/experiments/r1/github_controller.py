@@ -195,7 +195,17 @@ class GitHubR1Controller:
             if status not in success_statuses:
                 return None, self._failed(action, "invalid_provider_response")
 
-            raw_body = response.read(self._max_response_bytes + 1)  # type: ignore[attr-defined]
+            try:
+                raw_body = response.read(self._max_response_bytes + 1)  # type: ignore[attr-defined]
+            except (
+                OSError,
+                TimeoutError,
+                http.client.HTTPException,
+                TypeError,
+                ValueError,
+                OverflowError,
+            ):
+                return None, invalid_success()
             if len(raw_body) > self._max_response_bytes:
                 return None, invalid_success()
             try:
@@ -414,13 +424,20 @@ class GitHubR1Controller:
                 base_obj = item.get("base")
                 if not isinstance(head, dict) or not isinstance(base_obj, dict):
                     continue
+                head_repo = head.get("repo")
                 base_repo = base_obj.get("repo")
-                if not isinstance(base_repo, dict):
+                if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+                    continue
+                try:
+                    head_repository_id = _positive_int(head_repo.get("id"))
+                    base_repository_id = _positive_int(base_repo.get("id"))
+                except ValueError:
                     continue
                 if (
                     head.get("ref") != branch
                     or base_obj.get("ref") != base
-                    or base_repo.get("id") != self._target.repository_id
+                    or head_repository_id != self._target.repository_id
+                    or base_repository_id != self._target.repository_id
                 ):
                     continue
                 matches.append(_positive_int(item.get("number")))
