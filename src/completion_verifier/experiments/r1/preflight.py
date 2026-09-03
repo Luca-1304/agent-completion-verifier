@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .models import R1_CONTROLLER_ACTIONS, R1_SCENARIOS
+from .scenarios import get_r1_scenario
 
 
 _PREFLIGHT_REASONS = frozenset(
@@ -45,12 +47,7 @@ def _positive_repository_id(value: object, name: str) -> int:
 
 
 def _validate_locator(value: object) -> str:
-    """Validate a deliberately conservative ASCII GitHub owner/repository locator.
-
-    R1 does not need to support every name the provider might accept. Restricting
-    the live experiment to an unambiguous URL-safe subset removes dot-segment,
-    percent-encoding, query/fragment, whitespace and Unicode-confusable ambiguity.
-    """
+    """Validate the conservative ASCII GitHub owner/repository subset used by R1."""
     if not isinstance(value, str) or not value or value != value.strip():
         raise ValueError("Repository locator must be a non-empty exact string.")
     if value.count("/") != 1 or "\\" in value or "\x00" in value:
@@ -73,6 +70,23 @@ def _validate_capabilities(value: object, name: str) -> tuple[str, ...]:
     if any(not isinstance(item, str) for item in value):
         raise ValueError(f"'{name}' must contain strings.")
     return value
+
+
+def artifact_destination_binding(value: str | Path) -> str:
+    """Return a private canonical binding for the reviewed artifact destination.
+
+    This value is intentionally kept in memory only. It is not a public digest or
+    an anonymization mechanism.
+    """
+    if not isinstance(value, (str, Path)):
+        raise ValueError("Artifact destination must be path-like.")
+    path = Path(value)
+    if not str(path):
+        raise ValueError("Artifact destination must be non-empty.")
+    try:
+        return str(path.expanduser().resolve(strict=False))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError("Artifact destination cannot be canonicalized.") from exc
 
 
 @dataclass(frozen=True, repr=False)
@@ -111,6 +125,7 @@ class R1PreflightRequest:
     privacy_sentinel_passed: bool
     cleanup_plan_defined: bool
     verifier_credential_available: bool
+    artifact_destination_binding: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.protected_repository_ids, frozenset):
@@ -122,6 +137,12 @@ class R1PreflightRequest:
             raise ValueError("Protected repository IDs must be positive integers.")
         _validate_capabilities(self.requested_capabilities, "requested_capabilities")
         _validate_capabilities(self.scenario_capabilities, "scenario_capabilities")
+        if self.artifact_destination_binding is not None:
+            object.__setattr__(
+                self,
+                "artifact_destination_binding",
+                artifact_destination_binding(self.artifact_destination_binding),
+            )
 
     def __repr__(self) -> str:
         return "R1PreflightRequest()"
@@ -131,24 +152,32 @@ class R1PreflightRequest:
 class R1LivePermit:
     _scenario_id: str
     _repository_id: int
+    _repository_locator: str
     _capabilities: tuple[str, ...]
     _max_live_actions: int
+    _artifact_destination_binding: str | None
+    _consumed: bool
 
     def __init__(
         self,
         *,
         scenario_id: str,
         repository_id: int,
+        repository_locator: str,
         capabilities: tuple[str, ...],
         max_live_actions: int,
+        artifact_binding: str | None,
         _key: object,
     ) -> None:
         if _key is not _PERMIT_KEY:
             raise ValueError("R1 live permits are issued only by successful preflight.")
         object.__setattr__(self, "_scenario_id", scenario_id)
         object.__setattr__(self, "_repository_id", repository_id)
+        object.__setattr__(self, "_repository_locator", _validate_locator(repository_locator))
         object.__setattr__(self, "_capabilities", tuple(capabilities))
         object.__setattr__(self, "_max_live_actions", max_live_actions)
+        object.__setattr__(self, "_artifact_destination_binding", artifact_binding)
+        object.__setattr__(self, "_consumed", False)
 
     def __repr__(self) -> str:
         return "R1LivePermit()"
@@ -225,20 +254,21 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
 
     if request.scenario_id not in R1_SCENARIOS:
         return _reject("scenario_unreviewed")
-
     try:
+        definition = get_r1_scenario(request.scenario_id)
         requested = _validate_capabilities(
             request.requested_capabilities, "requested_capabilities"
         )
-        expected = _validate_capabilities(
+        supplied_expected = _validate_capabilities(
             request.scenario_capabilities, "scenario_capabilities"
         )
     except ValueError:
         return _reject("capability_mismatch")
+    expected = definition.capabilities
     if (
         requested != expected
+        or supplied_expected != expected
         or any(item not in R1_CONTROLLER_ACTIONS for item in requested)
-        or any(item not in R1_CONTROLLER_ACTIONS for item in expected)
     ):
         return _reject("capability_mismatch")
 
@@ -251,7 +281,10 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
         or request.actions_used < 0
     ):
         return _reject("action_budget_invalid")
-    if request.actions_used >= request.max_live_actions:
+    required_actions = len(expected)
+    if request.max_live_actions < required_actions:
+        return _reject("action_budget_invalid")
+    if request.actions_used + required_actions > request.max_live_actions:
         return _reject("action_budget_exhausted")
 
     if not destination_new or not destination_writable:
@@ -266,8 +299,10 @@ def run_preflight(request: R1PreflightRequest) -> R1PreflightResult:
     permit = R1LivePermit(
         scenario_id=request.scenario_id,
         repository_id=request.target.repository_id,
-        capabilities=request.requested_capabilities,
+        repository_locator=request.target.repository_locator,
+        capabilities=expected,
         max_live_actions=request.max_live_actions,
+        artifact_binding=request.artifact_destination_binding,
         _key=_PERMIT_KEY,
     )
     return R1PreflightResult(True, "preflight_passed", permit)
@@ -281,8 +316,10 @@ def validate_live_permit(
     capabilities: tuple[str, ...],
     actions_used: int,
     action_cost: int,
+    repository_locator: str | None = None,
+    artifact_binding: str | None = None,
 ) -> bool:
-    if not isinstance(permit, R1LivePermit):
+    if not isinstance(permit, R1LivePermit) or permit._consumed:
         return False
     if isinstance(repository_id, bool) or not isinstance(repository_id, int):
         return False
@@ -292,9 +329,48 @@ def validate_live_permit(
         return False
     if not isinstance(capabilities, tuple):
         return False
+    if repository_locator is not None:
+        try:
+            locator = _validate_locator(repository_locator)
+        except ValueError:
+            return False
+        if locator != permit._repository_locator:
+            return False
+    if artifact_binding is not None:
+        try:
+            destination = artifact_destination_binding(artifact_binding)
+        except ValueError:
+            return False
+        if permit._artifact_destination_binding != destination:
+            return False
     return (
         scenario_id == permit._scenario_id
         and repository_id == permit._repository_id
         and capabilities == permit._capabilities
         and actions_used + action_cost <= permit._max_live_actions
     )
+
+
+def consume_live_permit(
+    permit: R1LivePermit,
+    *,
+    scenario_id: str,
+    repository_id: int,
+    repository_locator: str,
+    capabilities: tuple[str, ...],
+    artifact_binding: str | None,
+) -> bool:
+    """Consume a process-local permit immediately before the first live mutation."""
+    if not validate_live_permit(
+        permit,
+        scenario_id=scenario_id,
+        repository_id=repository_id,
+        repository_locator=repository_locator,
+        capabilities=capabilities,
+        actions_used=0,
+        action_cost=1,
+        artifact_binding=artifact_binding,
+    ):
+        return False
+    object.__setattr__(permit, "_consumed", True)
+    return True
