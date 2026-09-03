@@ -8,6 +8,71 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src" / "completion_verifier"
+WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _write_http_findings(path: Path, text: str) -> list[str]:
+    tree = ast.parse(text, filename=str(path))
+    findings: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            if func.attr.upper() in WRITE_METHODS:
+                findings.append(f"{path}:{node.lineno}:{func.attr.upper()}")
+                continue
+            if func.attr == "request":
+                method: str | None = None
+                if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                    method = node.args[0].value
+                for keyword in node.keywords:
+                    if keyword.arg == "method" and isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
+                        method = keyword.value.value
+                if method is not None and method.upper() in WRITE_METHODS:
+                    findings.append(f"{path}:{node.lineno}:{method.upper()}")
+        elif isinstance(func, ast.Name) and func.id.upper() in WRITE_METHODS:
+            findings.append(f"{path}:{node.lineno}:{func.id.upper()}")
+    return findings
+
+
+def _secret_discovery_findings(path: Path, text: str) -> list[str]:
+    tree = ast.parse(text, filename=str(path))
+    findings: list[str] = []
+    os_aliases: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "os":
+                    os_aliases.add(alias.asname or "os")
+                if alias.name in {"keyring", "netrc"}:
+                    findings.append(f"{path}:{node.lineno}:import-{alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module == "os":
+                for alias in node.names:
+                    if alias.name in {"environ", "getenv"}:
+                        findings.append(f"{path}:{node.lineno}:from-os-{alias.name}")
+            if module in {"keyring", "netrc"}:
+                findings.append(f"{path}:{node.lineno}:from-{module}")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id in os_aliases and node.attr in {"environ", "getenv"}:
+                findings.append(f"{path}:{node.lineno}:os-{node.attr}")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id in os_aliases
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value in {"environ", "getenv"}
+        ):
+            findings.append(f"{path}:{node.lineno}:os-getattr")
+    return findings
 
 
 class PublicSurfaceTests(unittest.TestCase):
@@ -29,50 +94,44 @@ class PublicSurfaceTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertFalse(path.exists())
 
-    def test_stable_python_source_has_no_literal_write_http_request(self) -> None:
-        forbidden_methods = {"POST", "PUT", "PATCH", "DELETE"}
+    def test_stable_python_source_has_no_write_http_calls(self) -> None:
         findings: list[str] = []
         for path in SOURCE.rglob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                if (
-                    isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "request"
-                    and node.args
-                    and isinstance(node.args[0], ast.Constant)
-                    and isinstance(node.args[0].value, str)
-                    and node.args[0].value.upper() in forbidden_methods
-                ):
-                    findings.append(f"{path.relative_to(ROOT)}:{node.lineno}")
-                for keyword in node.keywords:
-                    if (
-                        keyword.arg == "method"
-                        and isinstance(keyword.value, ast.Constant)
-                        and isinstance(keyword.value.value, str)
-                        and keyword.value.value.upper() in forbidden_methods
-                    ):
-                        findings.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+            findings.extend(_write_http_findings(path.relative_to(ROOT), path.read_text(encoding="utf-8")))
         self.assertEqual(findings, [])
 
-    def test_stable_source_does_not_discover_common_local_secrets(self) -> None:
-        forbidden_tokens = (
-            "os.environ",
-            "os.getenv(",
-            "from os import getenv",
-            "import keyring",
-            "from keyring",
-            "netrc.netrc",
-            "from netrc",
+    def test_write_http_gate_detects_request_and_verb_specific_calls(self) -> None:
+        samples = (
+            'client.request("POST", "/resource")',
+            'client.request("/resource", method="PATCH")',
+            'client.put("/resource")',
+            'session.delete("/resource")',
+            'post("/resource")',
         )
+        for sample in samples:
+            with self.subTest(sample=sample):
+                self.assertTrue(_write_http_findings(Path("sample.py"), sample))
+        self.assertEqual(_write_http_findings(Path("sample.py"), 'client.get("/resource")'), [])
+
+    def test_stable_source_does_not_discover_common_local_secrets(self) -> None:
         findings: list[str] = []
         for path in SOURCE.rglob("*.py"):
-            text = path.read_text(encoding="utf-8")
-            for token in forbidden_tokens:
-                if token in text:
-                    findings.append(f"{path.relative_to(ROOT)}:{token}")
+            findings.extend(_secret_discovery_findings(path.relative_to(ROOT), path.read_text(encoding="utf-8")))
         self.assertEqual(findings, [])
+
+    def test_secret_discovery_gate_detects_aliases(self) -> None:
+        samples = (
+            'import os as operating_system\nvalue = operating_system.environ.get("TOKEN")',
+            'from os import environ as env\nvalue = env.get("TOKEN")',
+            'from os import getenv as read_env\nvalue = read_env("TOKEN")',
+            'import keyring as secrets\nvalue = secrets.get_password("svc", "user")',
+            'from netrc import netrc as read_netrc\nvalue = read_netrc()',
+            'import os as operating_system\nvalue = getattr(operating_system, "environ")',
+        )
+        for sample in samples:
+            with self.subTest(sample=sample):
+                self.assertTrue(_secret_discovery_findings(Path("sample.py"), sample))
+        self.assertEqual(_secret_discovery_findings(Path("sample.py"), "import pathlib\nvalue = pathlib.Path('.')"), [])
 
     def test_package_has_no_live_execution_entry_point_or_provider_sdk_extra(self) -> None:
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -87,10 +146,10 @@ class PublicSurfaceTests(unittest.TestCase):
             name = path.name.lower()
             if (
                 name == ".env"
-                or name.startswith(".env.") and not name.endswith(".example")
+                or (name.startswith(".env.") and not name.endswith(".example"))
                 or path.suffix.lower() in {".pem", ".key"}
                 or name in {"credentials.json", "secrets.json", "secrets.txt"}
-                or name.startswith("credentials.") and name.endswith(".json")
+                or (name.startswith("credentials.") and name.endswith(".json"))
             ):
                 findings.append(str(path.relative_to(ROOT)))
         self.assertEqual(findings, [])
