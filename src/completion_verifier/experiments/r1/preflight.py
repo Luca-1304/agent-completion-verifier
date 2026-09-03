@@ -124,6 +124,14 @@ class R1PreflightRequest:
         return "R1PreflightRequest()"
 
 
+class _PermitConsumptionState:
+    __slots__ = ("lock", "consumed")
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.consumed = False
+
+
 @dataclass(frozen=True, init=False, repr=False)
 class R1LivePermit:
     _scenario_id: str
@@ -131,8 +139,7 @@ class R1LivePermit:
     _repository_id: int
     _capabilities: tuple[str, ...]
     _max_live_actions: int
-    _consume_lock: Lock
-    _consumed: bool
+    _consume_state: _PermitConsumptionState
 
     def __init__(
         self,
@@ -151,8 +158,7 @@ class R1LivePermit:
         object.__setattr__(self, "_repository_id", repository_id)
         object.__setattr__(self, "_capabilities", tuple(capabilities))
         object.__setattr__(self, "_max_live_actions", max_live_actions)
-        object.__setattr__(self, "_consume_lock", Lock())
-        object.__setattr__(self, "_consumed", False)
+        object.__setattr__(self, "_consume_state", _PermitConsumptionState())
 
     def __repr__(self) -> str:
         return "R1LivePermit()"
@@ -323,8 +329,9 @@ def validate_live_permit(
 def consume_live_permit(permit: R1LivePermit) -> bool:
     if not isinstance(permit, R1LivePermit):
         return False
-    with permit._consume_lock:
-        if permit._consumed:
+    state = permit._consume_state
+    with state.lock:
+        if state.consumed:
             return False
-        object.__setattr__(permit, "_consumed", True)
+        state.consumed = True
         return True
