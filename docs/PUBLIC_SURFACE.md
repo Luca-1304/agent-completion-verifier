@@ -47,8 +47,8 @@ Offline adapters that parse already-recorded provider traces are allowed when th
 
 - private experiment/live-execution namespaces are absent from the stable source tree;
 - the internal planning archive and known live experiment/runbook/config/workflow files are absent;
-- Python source does not issue literal `POST`, `PUT`, `PATCH` or `DELETE` requests;
-- the stable source tree does not discover credentials through common environment/local-secret mechanisms;
+- executable Python in the installable package **and release-helper scripts** does not issue literal `POST`, `PUT`, `PATCH` or `DELETE` requests;
+- executable Python in the installable package and release-helper scripts does not discover credentials through common environment/local-secret mechanisms;
 - the package exposes no live provider-execution CLI or provider SDK extra;
 - the security and public-surface policy files remain present.
 
