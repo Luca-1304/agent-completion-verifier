@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src" / "completion_verifier"
+SCRIPTS = ROOT / "scripts"
+EXECUTABLE_PYTHON_ROOTS = (SOURCE, SCRIPTS)
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -75,6 +77,11 @@ def _secret_discovery_findings(path: Path, text: str) -> list[str]:
     return findings
 
 
+def _iter_executable_python_files():
+    for root in EXECUTABLE_PYTHON_ROOTS:
+        yield from root.rglob("*.py")
+
+
 class PublicSurfaceTests(unittest.TestCase):
     def test_private_execution_namespaces_are_not_in_stable_tree(self) -> None:
         self.assertFalse((SOURCE / "experiments").exists())
@@ -94,9 +101,13 @@ class PublicSurfaceTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertFalse(path.exists())
 
-    def test_stable_python_source_has_no_write_http_calls(self) -> None:
+    def test_executable_python_gate_covers_package_and_release_scripts(self) -> None:
+        self.assertEqual(EXECUTABLE_PYTHON_ROOTS, (SOURCE, SCRIPTS))
+        self.assertTrue(SCRIPTS.is_dir())
+
+    def test_stable_executable_python_has_no_write_http_calls(self) -> None:
         findings: list[str] = []
-        for path in SOURCE.rglob("*.py"):
+        for path in _iter_executable_python_files():
             findings.extend(_write_http_findings(path.relative_to(ROOT), path.read_text(encoding="utf-8")))
         self.assertEqual(findings, [])
 
@@ -113,9 +124,9 @@ class PublicSurfaceTests(unittest.TestCase):
                 self.assertTrue(_write_http_findings(Path("sample.py"), sample))
         self.assertEqual(_write_http_findings(Path("sample.py"), 'client.get("/resource")'), [])
 
-    def test_stable_source_does_not_discover_common_local_secrets(self) -> None:
+    def test_stable_executable_python_does_not_discover_common_local_secrets(self) -> None:
         findings: list[str] = []
-        for path in SOURCE.rglob("*.py"):
+        for path in _iter_executable_python_files():
             findings.extend(_secret_discovery_findings(path.relative_to(ROOT), path.read_text(encoding="utf-8")))
         self.assertEqual(findings, [])
 
