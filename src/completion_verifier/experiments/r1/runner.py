@@ -526,6 +526,7 @@ def run_r1_live(config: R1ExperimentConfig, permit: R1LivePermit | None, control
         raise ValueError("One R1 live invocation is bound to exactly one scenario permit.")
     if type(scaffold) is not ScriptedR1Scaffold:
         raise R1RunnerAbort("live_scaffold_untrusted")
+    trusted_scaffold = ScriptedR1Scaffold()
     definition = get_r1_scenario(config.scenarios[0])
     if not definition.live_eligible:
         raise R1RunnerAbort("scenario_not_live_eligible")
@@ -548,5 +549,5 @@ def run_r1_live(config: R1ExperimentConfig, permit: R1LivePermit | None, control
     if not consume_live_permit(permit):
         _release_empty_reservation(reserved_output)
         raise R1RunnerAbort("live_permit_consumed")
-    runs = tuple(_execute_attempt(attempt=item, config=config, controller=controller, verifier=verifier, scaffold=scaffold, permit=permit) for item in attempts)
+    runs = tuple(_execute_attempt(attempt=item, config=config, controller=controller, verifier=verifier, scaffold=trusted_scaffold, permit=permit) for item in attempts)
     return _result(config=config, attempts=attempts, runs=runs, output_dir=reserved_output, live=True, forbidden_literals=forbidden_literals)
