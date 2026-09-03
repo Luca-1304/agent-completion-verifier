@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import unittest
 from pathlib import Path
 
@@ -77,6 +78,41 @@ class PublicSurfaceTests(unittest.TestCase):
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertNotIn("completion-verifier-live", pyproject)
         self.assertNotIn('openai = ["openai', pyproject)
+
+    def test_repository_contains_no_obvious_secret_files(self) -> None:
+        findings: list[str] = []
+        for path in ROOT.rglob("*"):
+            if not path.is_file() or ".git" in path.parts:
+                continue
+            name = path.name.lower()
+            if (
+                name == ".env"
+                or name.startswith(".env.") and not name.endswith(".example")
+                or path.suffix.lower() in {".pem", ".key"}
+                or name in {"credentials.json", "secrets.json", "secrets.txt"}
+                or name.startswith("credentials.") and name.endswith(".json")
+            ):
+                findings.append(str(path.relative_to(ROOT)))
+        self.assertEqual(findings, [])
+
+    def test_repository_contains_no_high_confidence_secret_literals(self) -> None:
+        patterns = (
+            re.compile(r"ghp_[A-Za-z0-9]{30,}"),
+            re.compile(r"github_pat_[A-Za-z0-9_]{40,}"),
+            re.compile(r"sk-proj-[A-Za-z0-9_-]{20,}"),
+            re.compile(r"AKIA[0-9A-Z]{16}"),
+            re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+        )
+        text_suffixes = {".py", ".md", ".json", ".jsonl", ".toml", ".yml", ".yaml", ".txt"}
+        findings: list[str] = []
+        for path in ROOT.rglob("*"):
+            if not path.is_file() or ".git" in path.parts or path.suffix.lower() not in text_suffixes:
+                continue
+            text = path.read_text(encoding="utf-8", errors="strict")
+            for pattern in patterns:
+                if pattern.search(text):
+                    findings.append(f"{path.relative_to(ROOT)}:{pattern.pattern}")
+        self.assertEqual(findings, [])
 
     def test_public_security_policies_are_present(self) -> None:
         self.assertTrue((ROOT / "SECURITY.md").is_file())
