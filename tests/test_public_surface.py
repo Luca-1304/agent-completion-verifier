@@ -15,13 +15,11 @@ class PublicSurfaceTests(unittest.TestCase):
         self.assertFalse((SOURCE / "live").exists())
         self.assertFalse((SOURCE / "live_cli.py").exists())
 
-    def test_private_execution_runbooks_are_not_in_stable_tree(self) -> None:
+    def test_internal_planning_and_live_runbooks_are_not_in_stable_tree(self) -> None:
+        self.assertFalse((ROOT / "docs" / "superpowers").exists())
         forbidden = (
             ROOT / "docs" / "R1_EXPERIMENT.md",
             ROOT / "docs" / "LIVE_RUNNER.md",
-            ROOT / "docs" / "superpowers" / "plans" / "2026-08-29-r1-real-provider-experiment.md",
-            ROOT / "docs" / "superpowers" / "specs" / "2026-08-29-r1-real-provider-experiment-design.md",
-            ROOT / "docs" / "superpowers" / "specs" / "2026-07-21-openai-responses-sandbox-runner-design.md",
             ROOT / "scripts" / "verify_r1_release.py",
             ROOT / "examples" / "openai_live_config.json",
             ROOT / ".github" / "workflows" / "live-runner-tests.yml",

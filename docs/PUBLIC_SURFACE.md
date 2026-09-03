@@ -2,7 +2,7 @@
 
 This project is public by design, but **not every useful internal capability belongs in the public repository**.
 
-The publication rule is simple: expose enough for people to understand, test and use the verifier safely; keep live operational control, private data and proprietary runbooks out of the stable public package.
+The publication rule is simple: expose enough for people to understand, test and use the verifier safely; keep live operational control, private data and internal implementation playbooks out of the stable public package.
 
 ## Public by design
 
@@ -17,7 +17,7 @@ The following are appropriate public surfaces:
 - offline adapters for already-recorded tool traces;
 - fake transports, synthetic fixtures and reproducible non-sensitive tests;
 - aggregate metrics, limitations and clearly bounded research claims;
-- installation, API and contribution documentation needed for legitimate use.
+- curated installation, API, design and contribution documentation needed for legitimate use.
 
 ## Not part of the stable public surface
 
@@ -30,8 +30,8 @@ Do not publish these in the stable package or public release documentation:
 - production/disposable target identifiers, repository IDs, branch names, object IDs or private denylist contents;
 - private experiment configuration, private traces, raw model/provider bodies or personal/customer data;
 - exact operational runbooks for live experiments, cleanup, target selection or credential separation;
-- internal prompts, unpublished commercial strategy or other material that is not required to use the public verifier;
-- infrastructure topology or security configuration that would unnecessarily increase attack surface.
+- internal implementation plans, scratch specifications, agent-development prompts or workflow playbooks that are not required to use the public verifier;
+- unpublished commercial strategy or infrastructure/security topology that would unnecessarily increase attack surface.
 
 ## Provider-integration rule
 
@@ -46,7 +46,7 @@ Offline adapters that parse already-recorded provider traces are allowed when th
 `tests/test_public_surface.py` enforces a conservative release boundary. It checks that:
 
 - private experiment/live-execution namespaces are absent from the stable source tree;
-- known live experiment/runbook/config/workflow files are absent;
+- the internal planning archive and known live experiment/runbook/config/workflow files are absent;
 - Python source does not issue literal `POST`, `PUT`, `PATCH` or `DELETE` requests;
 - the stable source tree does not discover credentials through common environment/local-secret mechanisms;
 - the package exposes no live provider-execution CLI or provider SDK extra;
