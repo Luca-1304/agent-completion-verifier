@@ -41,6 +41,13 @@ The current release provides:
 
 ## Next experimental expansion
 
+Any future controller, credential-backed runner, target-selection procedure or
+live mutation runbook belongs in a separately controlled private/operator
+research environment. It is deliberately **not** part of the stable public
+package or public release documentation. Public `main` should retain only the
+read-only verifier and non-sensitive evidence needed to reproduce its bounded
+claims.
+
 1. Run a separately gated real-provider experiment in a disposable/research
    GitHub repository using the v0.8 verifier. Keep source-agent claims/traces
    separate from the independent provider observation and avoid production or
