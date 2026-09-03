@@ -318,8 +318,11 @@ def validate_live_permit(
     action_cost: int,
     repository_locator: str | None = None,
     artifact_binding: str | None = None,
+    allow_consumed: bool = False,
 ) -> bool:
-    if not isinstance(permit, R1LivePermit) or permit._consumed:
+    if not isinstance(permit, R1LivePermit):
+        return False
+    if permit._consumed and not allow_consumed:
         return False
     if isinstance(repository_id, bool) or not isinstance(repository_id, int):
         return False
