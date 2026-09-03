@@ -214,22 +214,6 @@ identifiers are excluded from default public evidence. See
 [`docs/REMOTE_GITHUB.md`](docs/REMOTE_GITHUB.md) for the exact trust, privacy and
 freshness boundary.
 
-## R1 real-provider experiment harness
-
-R1 is an **experimental** validation harness layered around the v0.8 verifier.
-It separates a bounded source-agent task, source claim/controller receipts, an
-independently specified contract, and the authenticated remote observation. Its
-live writer is deliberately limited to an R1-prefixed branch, one reserved
-fixture path, a draft pull request, and closing that pull request; a fail-closed
-preflight permit and action budget are required before any live mutation.
-
-The source-controlled release smoke uses only a dry controller and fake verifier.
-No disposable-target pilot has been completed yet, so there is **no real-provider
-reliability claim** from R1. The pilot remains a separate, reviewed step and must
-not target this repository or another important/production repository. See
-[`docs/R1_EXPERIMENT.md`](docs/R1_EXPERIMENT.md) for the experimental trust,
-privacy, cleanup and proof boundaries.
-
 ## What is tested
 
 The included cases cover:
@@ -247,10 +231,7 @@ The included cases cover:
 - authenticated GitHub PR match, mismatch and indeterminate outcomes;
 - repository/head/base/state identity checks and merge-state consistency;
 - fail-closed GitHub auth, permission, rate-limit, redirect, network and malformed-response handling;
-- remote public evidence that excludes credentials and private provider identifiers;
-- R1 preflight, fixed action budgets, target binding, dry-run isolation and cleanup reservation;
-- explicit S7 match-then-rollback evidence preserving both remote observations;
-- privacy-minimal R1 artifacts with sentinel and manifest verification.
+- remote public evidence that excludes credentials and private provider identifiers.
 
 See [`RESULTS.md`](RESULTS.md) for the reproducible local result summary and
 [`docs/DESIGN.md`](docs/DESIGN.md) for the evaluation rules.
@@ -272,10 +253,9 @@ Temporal re-verification is also required where later rollback or revocation
 matters.
 
 The included benchmark results remain deterministic/local rather than live
-external-model performance results. The v0.8 remote release tests and the R1
-release smoke use fake readers/transports/verifiers and make **no real-provider
-reliability claim**. This project makes no claim of modifying model weights or
-improving model training.
+external-model performance results. The v0.8 remote release tests use fake
+readers/transports and make no real-provider reliability claim. This project
+makes no claim of modifying model weights or improving model training.
 
 ## Authorship and AI assistance
 
@@ -291,12 +271,11 @@ statement.
 
 ## Roadmap
 
-With the v0.8 GitHub remote-state verifier and experimental R1 harness
-implemented, the next research step remains a separately gated pilot in a
-disposable/research repository: compare an agent's completion claim with the
-independent provider observation, inject false-success and mismatch conditions,
-review the evidence, then repeat across independently implemented agent
-scaffolds before making comparative reliability claims. See
+With the v0.8 GitHub remote-state verifier implemented, the next research step
+is a separately gated experiment in a disposable/research repository: compare an
+agent's completion claim with the independent provider observation, inject
+false-success and mismatch conditions, then repeat across independently
+implemented agent scaffolds before making comparative reliability claims. See
 [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
 
 ## License
