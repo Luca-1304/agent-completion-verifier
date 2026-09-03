@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -13,8 +12,6 @@ from completion_verifier.benchmark import verify_manifest
 from completion_verifier.sandbox import verify_sandbox_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
-ENV = os.environ.copy()
-ENV["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + ENV.get("PYTHONPATH", "")
 
 
 def run(*command: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
@@ -22,7 +19,6 @@ def run(*command: str, capture: bool = False) -> subprocess.CompletedProcess[str
     return subprocess.run(
         command,
         cwd=ROOT,
-        env=ENV,
         check=True,
         text=True,
         capture_output=capture,
