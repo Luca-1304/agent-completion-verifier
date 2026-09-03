@@ -14,6 +14,7 @@ The following are appropriate public surfaces:
 - privacy-minimal observation/evidence schemas and fixed reason codes;
 - deterministic local benchmarks and failure-injection cases;
 - confined local sandbox examples;
+- offline adapters for already-recorded tool traces;
 - fake transports, synthetic fixtures and reproducible non-sensitive tests;
 - aggregate metrics, limitations and clearly bounded research claims;
 - installation, API and contribution documentation needed for legitimate use.
@@ -23,6 +24,7 @@ The following are appropriate public surfaces:
 Do not publish these in the stable package or public release documentation:
 
 - provider write/mutation controllers or live-action orchestration;
+- live model/provider execution bridges, paid-provider launchers or credential-backed experiment runners;
 - credentials, tokens, authorization headers or secret material;
 - automatic secret discovery from environment variables, local stores or account metadata;
 - production/disposable target identifiers, repository IDs, branch names, object IDs or private denylist contents;
@@ -33,18 +35,21 @@ Do not publish these in the stable package or public release documentation:
 
 ## Provider-integration rule
 
-New public provider integrations default to **read-only observation**. A write-capable integration is treated as operational infrastructure and must not silently enter the stable public package.
+New public provider integrations default to **read-only observation**. A write-capable integration or live provider-execution bridge is operational infrastructure and must not silently enter the stable public package.
 
 The stable package must fail closed when authentication, authorization, provider identity, freshness or remote state is ambiguous. Public evidence remains privacy-minimal by default.
+
+Offline adapters that parse already-recorded provider traces are allowed when they make no provider call and do not require credentials.
 
 ## Release gate
 
 `tests/test_public_surface.py` enforces a conservative release boundary. It checks that:
 
-- the private research/experiment namespace is absent from the stable source tree;
-- known live R1 design/runbook files are absent;
+- private experiment/live-execution namespaces are absent from the stable source tree;
+- known live experiment/runbook/config/workflow files are absent;
 - Python source does not issue literal `POST`, `PUT`, `PATCH` or `DELETE` requests;
 - the stable source tree does not discover credentials through common environment/local-secret mechanisms;
+- the package exposes no live provider-execution CLI or provider SDK extra;
 - the security and public-surface policy files remain present.
 
 A future exception requires an explicit review of this policy rather than weakening the test incidentally.

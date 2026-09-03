@@ -10,15 +10,21 @@ SOURCE = ROOT / "src" / "completion_verifier"
 
 
 class PublicSurfaceTests(unittest.TestCase):
-    def test_private_experiment_namespace_is_not_in_stable_tree(self) -> None:
+    def test_private_execution_namespaces_are_not_in_stable_tree(self) -> None:
         self.assertFalse((SOURCE / "experiments").exists())
+        self.assertFalse((SOURCE / "live").exists())
+        self.assertFalse((SOURCE / "live_cli.py").exists())
 
-    def test_live_r1_runbooks_are_not_in_stable_tree(self) -> None:
+    def test_private_execution_runbooks_are_not_in_stable_tree(self) -> None:
         forbidden = (
             ROOT / "docs" / "R1_EXPERIMENT.md",
+            ROOT / "docs" / "LIVE_RUNNER.md",
             ROOT / "docs" / "superpowers" / "plans" / "2026-08-29-r1-real-provider-experiment.md",
             ROOT / "docs" / "superpowers" / "specs" / "2026-08-29-r1-real-provider-experiment-design.md",
+            ROOT / "docs" / "superpowers" / "specs" / "2026-07-21-openai-responses-sandbox-runner-design.md",
             ROOT / "scripts" / "verify_r1_release.py",
+            ROOT / "examples" / "openai_live_config.json",
+            ROOT / ".github" / "workflows" / "live-runner-tests.yml",
         )
         for path in forbidden:
             with self.subTest(path=path):
@@ -68,6 +74,11 @@ class PublicSurfaceTests(unittest.TestCase):
                 if token in text:
                     findings.append(f"{path.relative_to(ROOT)}:{token}")
         self.assertEqual(findings, [])
+
+    def test_package_has_no_live_execution_entry_point_or_provider_sdk_extra(self) -> None:
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertNotIn("completion-verifier-live", pyproject)
+        self.assertNotIn('openai = ["openai', pyproject)
 
     def test_public_security_policies_are_present(self) -> None:
         self.assertTrue((ROOT / "SECURITY.md").is_file())
