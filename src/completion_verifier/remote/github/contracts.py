@@ -30,6 +30,10 @@ def _repository_locator(value: object) -> str:
         raise ValueError("'repository' must use owner/name form.")
     if any(ord(char) < 32 or ord(char) == 127 for char in locator):
         raise ValueError("'repository' contains a control character.")
+    # Reject HTTP path dot-segments even though they match the character allow-list.
+    # This avoids accidental URL path normalization away from /repos/{owner}/{repo}.
+    if any(segment in {".", ".."} for segment in locator.split("/")):
+        raise ValueError("'repository' cannot contain dot-only path segments.")
     return locator
 
 
